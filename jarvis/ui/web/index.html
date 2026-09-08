@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#050403">
+    <title>JARVIS 3.0</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body data-state="offline">
+    <canvas id="particle-field" aria-hidden="true"></canvas>
+    <div class="scanlines" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <div>
+          <p class="eyebrow">PERSONAL INTELLIGENCE SYSTEM</p>
+          <h1>JARVIS <span>3.0</span></h1>
+        </div>
+      </div>
+      <div class="connection">
+        <span class="connection-dot"></span>
+        <span id="connection-label">OFFLINE</span>
+      </div>
+    </header>
+
+    <main>
+      <aside class="system-panel glass-panel">
+        <p class="panel-label">SYSTEMS</p>
+        <div class="metric">
+          <span>VOICE CORE</span>
+          <b id="voice-status">STANDBY</b>
+        </div>
+        <div class="bar"><i style="--value: 84%"></i></div>
+        <div class="metric">
+          <span>SECURITY GATE</span>
+          <b id="security-status">OWNER</b>
+        </div>
+        <div class="bar"><i style="--value: 100%"></i></div>
+        <div class="metric">
+          <span>MEMORY</span>
+          <b>LOCAL</b>
+        </div>
+        <div class="bar"><i style="--value: 72%"></i></div>
+        <p class="microcopy" id="security-message">
+          Owner mode executes requested actions without confirmation.
+        </p>
+      </aside>
+
+      <section class="core-stage" aria-live="polite">
+        <div class="coordinate-grid" aria-hidden="true"></div>
+        <div class="orbital orbital-one" aria-hidden="true"></div>
+        <div class="orbital orbital-two" aria-hidden="true"></div>
+        <div class="orbital orbital-three" aria-hidden="true"></div>
+        <div class="ticks" aria-hidden="true"></div>
+        <div id="core" class="core" aria-hidden="true">
+          <div class="core-shell shell-one"></div>
+          <div class="core-shell shell-two"></div>
+          <div class="core-shell shell-three"></div>
+          <div class="core-light"></div>
+        </div>
+
+        <div class="status-readout">
+          <p id="status-kicker">NEURAL LINK</p>
+          <h2 id="status-title">OFFLINE</h2>
+          <p id="status-message">Start the LiveKit agent to connect.</p>
+        </div>
+
+        <div class="transcript">
+          <p class="transcript-user" id="user-transcript"></p>
+          <p class="transcript-jarvis" id="jarvis-transcript"></p>
+        </div>
+      </section>
+
+      <aside class="controls-panel">
+        <button id="talk-button" class="talk-button" type="button">
+          <span class="talk-rings" aria-hidden="true"></span>
+          <span class="talk-icon" aria-hidden="true"></span>
+          <strong id="talk-label">CONNECT JARVIS</strong>
+          <small>HOLD TO TALK</small>
+        </button>
+        <div class="capabilities glass-panel">
+          <p class="panel-label">CAPABILITIES</p>
+          <ul>
+            <li><span></span> Open applications</li>
+            <li><span></span> Understand screen</li>
+            <li><span></span> Type and press keys</li>
+            <li><span></span> Run requested commands</li>
+            <li><span></span> Manage files and windows</li>
+            <li><span></span> Build PowerPoint decks</li>
+            <li><span></span> WhatsApp messages and calls</li>
+            <li><span></span> Spotify song playback</li>
+            <li><span></span> Verified screen navigation</li>
+            <li><span></span> Battery and system status</li>
+            <li><span></span> Remember context</li>
+          </ul>
+        </div>
+      </aside>
+    </main>
+
+    <section id="approval-panel" class="approval-panel" hidden>
+      <p class="panel-label">SECURITY CONFIRMATION</p>
+      <h3 id="approval-action">Action requires approval</h3>
+      <p id="approval-details"></p>
+      <div class="approval-actions">
+        <button id="deny-button" type="button">DENY</button>
+        <button id="approve-button" type="button">ALLOW ONCE</button>
+      </div>
+    </section>
+
+    <footer>
+      <span>LIVE AUDIO LINK</span>
+      <span class="footer-line"></span>
+      <span>LOCAL CONTROL GATE</span>
+      <span class="footer-line"></span>
+      <span id="clock"></span>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.21.0/dist/livekit-client.umd.min.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
