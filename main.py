@@ -1,3 +1,5 @@
+from threading import Thread
+
 from jarvis.config.settings import Settings
 from jarvis.brain.ollama import OllamaBrain
 from jarvis.brain.gemini_vision import GeminiVision
@@ -18,6 +20,7 @@ def main():
             s.ollama_think,
             s.ollama_keep_alive,
             s.ollama_num_predict,
+            s.ollama_num_ctx,
         ),
         Memory(s.memory_file),
         ScreenVision(s.screen_dir),
@@ -25,6 +28,7 @@ def main():
         WindowsComputer(),
         SecurityManager(s.log_dir / "audit.jsonl"),
     )
+    Thread(target=j.brain.warm_up, daemon=True).start()
     print("\n=== JARVIS Python ===\nType /help for commands. Type /exit to quit.\n")
     while True:
         try:

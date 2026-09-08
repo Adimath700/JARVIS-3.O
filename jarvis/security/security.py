@@ -40,14 +40,21 @@ class SecurityManager:
             "mouse.click",
             "mouse.scroll",
             "window.focus",
+            "browser.open",
+            "file.list",
         }:
             return Risk.MEDIUM
         if action in {
             "keyboard.type",
             "keyboard.press",
+            "keyboard.hotkey",
             "terminal.exec",
+            "file.read",
             "file.write",
             "file.rename",
+            "file.open",
+            "communication.send",
+            "communication.call",
         }:
             return Risk.HIGH
         if action in {"file.delete", "system.shutdown", "system.restart"}:

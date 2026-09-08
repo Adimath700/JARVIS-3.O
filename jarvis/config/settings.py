@@ -17,7 +17,8 @@ class Settings:
     ollama_model: str = os.getenv("OLLAMA_MODEL", "qwen3:8b")
     ollama_think: bool = env_bool("OLLAMA_THINK", False)
     ollama_keep_alive: str = os.getenv("OLLAMA_KEEP_ALIVE", "30m")
-    ollama_num_predict: int = int(os.getenv("OLLAMA_NUM_PREDICT", "256"))
+    ollama_num_predict: int = int(os.getenv("OLLAMA_NUM_PREDICT", "128"))
+    ollama_num_ctx: int = int(os.getenv("OLLAMA_NUM_CTX", "2048"))
     google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
     gemini_vision_model: str = os.getenv("GEMINI_VISION_MODEL", "gemini-3.5-flash")
     whisper_model: str = os.getenv("WHISPER_MODEL", "tiny.en")
@@ -27,6 +28,9 @@ class Settings:
     piper_voice: str = os.getenv("PIPER_VOICE", "en_US-lessac-medium")
     screen_dir: Path = ROOT / os.getenv("JARVIS_SCREEN_DIR", "data/screenshots")
     log_dir: Path = ROOT / os.getenv("JARVIS_LOG_DIR", "data/logs")
+    presentation_dir: Path = ROOT / os.getenv(
+        "JARVIS_PRESENTATION_DIR", "data/presentations"
+    )
     memory_file: Path = ROOT / os.getenv(
         "JARVIS_MEMORY_FILE", "data/memory/memory.json"
     )
@@ -34,4 +38,5 @@ class Settings:
     def ensure_dirs(self):
         self.screen_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.presentation_dir.mkdir(parents=True, exist_ok=True)
         self.memory_file.parent.mkdir(parents=True, exist_ok=True)

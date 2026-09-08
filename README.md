@@ -9,6 +9,8 @@ A Windows-first, Python-native foundation for a personal AI desktop assistant.
 - Local Whisper STT (`faster-whisper`)
 - Local Piper TTS support (optional)
 - Windows app launching, mouse, keyboard, files, terminal tools
+- WhatsApp message and call automation with explicit confirmation
+- PowerPoint presentation generation with a polished dark theme
 - Security/risk gates and audit log
 - Persistent JSON memory
 - CLI assistant loop
@@ -30,8 +32,9 @@ ollama pull qwen3:8b
 ```
 
 The default `.env.example` disables Qwen's thinking mode for normal assistant
-conversation, keeps the model loaded for 30 minutes, and caps responses at 256
-tokens. Adjust `OLLAMA_THINK`, `OLLAMA_KEEP_ALIVE`, and
+conversation, preloads the model in the background, keeps it loaded for 30
+minutes, uses a 2048-token context, and caps responses at 128 tokens. Adjust
+`OLLAMA_THINK`, `OLLAMA_KEEP_ALIVE`, `OLLAMA_NUM_CTX`, and
 `OLLAMA_NUM_PREDICT` if you prefer deeper or longer responses.
 
 For screen vision, set `GOOGLE_API_KEY` in `.env`. The screenshot is captured locally and sent only when JARVIS is asked to inspect the screen.
@@ -63,9 +66,12 @@ Direct CLI commands:
 ## Security
 The model never decides whether an action is safe. The security manager
 classifies actions and writes every decision to the local audit log. Opening
-apps, screen inspection, and memory are low risk. Typing, key presses, and
-terminal commands pause the voice tool and show an **Allow once / Deny**
-confirmation in the JARVIS UI. Critical actions remain disabled.
+apps, screen inspection, and memory are low risk. Mouse, keyboard, file,
+WhatsApp, presentation, and terminal actions pause the voice tool and show an
+**Allow once / Deny** confirmation in the JARVIS UI. Credential/key files are
+blocked, and destructive deletion, shutdown, and restart actions remain
+disabled. Common destructive terminal commands are also rejected rather than
+used to bypass those controls.
 
 ## Natural Voice + Holographic UI
 
@@ -85,14 +91,15 @@ Required `.env` values:
 - `LIVEKIT_GEMINI_MODEL=gemini-2.5-flash-native-audio-preview-12-2025`
 - `LIVEKIT_GEMINI_VOICE=Aoede`
 - `LIVEKIT_GEMINI_AFFECTIVE_DIALOG=true`
-- `LIVEKIT_PREFIX_PADDING_MS=100`
-- `LIVEKIT_SILENCE_DURATION_MS=400`
+- `LIVEKIT_PREFIX_PADDING_MS=50`
+- `LIVEKIT_SILENCE_DURATION_MS=200`
 - `JARVIS_UI_PORT=8765`
 - `JARVIS_UI_AUTO_OPEN=true`
 - `JARVIS_APPROVAL_TIMEOUT_SECONDS=45`
 
 The LiveKit silence duration controls how quickly JARVIS responds after you
-finish speaking. Increase it if natural pauses are being cut off.
+finish speaking. The faster 200 ms default follows Gemini Live's supported
+automatic VAD configuration. Increase it if natural pauses are being cut off.
 
 Install the optional voice dependencies:
 
@@ -138,6 +145,21 @@ Voice tool examples:
 - “Type this message into the active window.” (approval required)
 - “Press Enter.” (approval required)
 - “Run `dir` in the terminal.” (approval required)
+- “Send ‘I will arrive at six’ on WhatsApp to 15551234567.” (approval required)
+- “Start a WhatsApp voice call with 15551234567.” (approval required)
+- “Create a five-slide presentation about renewable energy.” (approval required)
+- “List the files in my Documents folder.” (approval required)
+- “Open my project presentation.” (approval required)
+
+WhatsApp automation requires WhatsApp Desktop or WhatsApp Web to already be
+signed in. Use a complete international number with country code. JARVIS sends
+only after showing the exact recipient/message for approval. Calls are started
+through the accessible WhatsApp call button when available; if the installed
+WhatsApp version does not expose that control, JARVIS leaves the correct chat
+open for manual completion rather than clicking an unknown screen position.
+
+Generated presentations are stored in `data/presentations` by default. Change
+`JARVIS_PRESENTATION_DIR` in `.env` to use another folder.
 
 The UI server binds only to `127.0.0.1`. LiveKit credentials stay in the Python
 process and the browser receives only a short-lived room participant token.

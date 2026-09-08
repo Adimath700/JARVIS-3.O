@@ -9,10 +9,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from jarvis.brain.gemini_vision import GeminiVision
+from jarvis.computer.files import FileWorkspace
 from jarvis.computer.windows import WindowsComputer
 from jarvis.config.settings import Settings
 from jarvis.core.capabilities import JarvisCapabilities
 from jarvis.memory.memory import Memory
+from jarvis.productivity.presentations import PresentationBuilder
 from jarvis.security.security import SecurityManager
 from jarvis.ui.state import ui_state
 from jarvis.vision.screen import ScreenVision
@@ -121,7 +123,16 @@ COMPUTER TOOLS
 - Use a tool only when the user has clearly asked for the related action.
 - Never claim an action succeeded until the tool reports success.
 - Opening apps, screen inspection, and memory use are automatically permitted.
-- Typing, key presses, and terminal commands require approval in the JARVIS UI.
+- Mouse, keyboard, WhatsApp, terminal, and file actions require approval in
+  the JARVIS UI.
+- WhatsApp tools require the recipient's full international phone number.
+- If WhatsApp opens a chat but cannot complete a call, explain that clearly.
+- Build a complete slide outline before calling the presentation tool. Separate
+  slides with a line containing `---`; put the slide title first, followed by
+  concise bullet lines.
+- File tools may organize and edit ordinary user files, but must never access
+  credentials, private keys, or secrets. Deletion and shutdown remain disabled.
+- Never use terminal commands to bypass a blocked destructive action.
 - If an action is denied or times out, say so briefly and do not retry it.
 - Never invent a tool result.
 
@@ -183,6 +194,238 @@ class JarvisVoiceAgent(Agent):
             key: A pyautogui key name, such as enter, tab, or escape.
         """
         return await asyncio.to_thread(self.capabilities.press_key, key)
+
+    @function_tool()
+    async def press_hotkey(
+        self,
+        context: RunContext,
+        keys: list[str],
+    ) -> str:
+        """Press a keyboard shortcut after UI approval.
+
+        Args:
+            keys: One to four keys, such as ["ctrl", "s"].
+        """
+        return await asyncio.to_thread(self.capabilities.press_hotkey, keys)
+
+    @function_tool()
+    async def move_mouse(
+        self,
+        context: RunContext,
+        x: int,
+        y: int,
+    ) -> str:
+        """Move the mouse pointer to screen coordinates after UI approval.
+
+        Args:
+            x: Horizontal screen coordinate.
+            y: Vertical screen coordinate.
+        """
+        return await asyncio.to_thread(self.capabilities.move_mouse, x, y)
+
+    @function_tool()
+    async def click_mouse(
+        self,
+        context: RunContext,
+        x: int,
+        y: int,
+        button: str = "left",
+    ) -> str:
+        """Click a screen coordinate after UI approval.
+
+        Args:
+            x: Horizontal screen coordinate.
+            y: Vertical screen coordinate.
+            button: left, middle, or right.
+        """
+        return await asyncio.to_thread(
+            self.capabilities.click_mouse,
+            x,
+            y,
+            button,
+        )
+
+    @function_tool()
+    async def scroll_mouse(
+        self,
+        context: RunContext,
+        amount: int,
+    ) -> str:
+        """Scroll the active window after UI approval.
+
+        Args:
+            amount: Positive scrolls up and negative scrolls down.
+        """
+        return await asyncio.to_thread(self.capabilities.scroll_mouse, amount)
+
+    @function_tool()
+    async def focus_window(
+        self,
+        context: RunContext,
+        title: str,
+    ) -> str:
+        """Focus an open Windows application after UI approval.
+
+        Args:
+            title: All or part of the window title.
+        """
+        return await asyncio.to_thread(self.capabilities.focus_window, title)
+
+    @function_tool()
+    async def send_whatsapp_message(
+        self,
+        context: RunContext,
+        phone_number: str,
+        message: str,
+    ) -> str:
+        """Send a WhatsApp message after the user approves the exact content.
+
+        Args:
+            phone_number: Full international number, including country code.
+            message: Exact message to send.
+        """
+        return await asyncio.to_thread(
+            self.capabilities.send_whatsapp_message,
+            phone_number,
+            message,
+        )
+
+    @function_tool()
+    async def start_whatsapp_call(
+        self,
+        context: RunContext,
+        phone_number: str,
+        video: bool = False,
+    ) -> str:
+        """Start a WhatsApp voice or video call after UI approval.
+
+        Args:
+            phone_number: Full international number, including country code.
+            video: True for video or false for voice.
+        """
+        return await asyncio.to_thread(
+            self.capabilities.start_whatsapp_call,
+            phone_number,
+            video,
+        )
+
+    @function_tool()
+    async def create_presentation(
+        self,
+        context: RunContext,
+        title: str,
+        outline: str,
+        subtitle: str = "",
+        filename: str = "",
+    ) -> str:
+        """Create a polished PowerPoint presentation after UI approval.
+
+        Args:
+            title: Presentation title.
+            outline: Slides separated by ---, each with a title and bullets.
+            subtitle: Optional title-slide subtitle.
+            filename: Optional output filename without a directory.
+        """
+        return await asyncio.to_thread(
+            self.capabilities.create_presentation,
+            title,
+            outline,
+            subtitle,
+            filename,
+        )
+
+    @function_tool()
+    async def list_directory(
+        self,
+        context: RunContext,
+        path: str,
+    ) -> str:
+        """List files and folders after UI approval.
+
+        Args:
+            path: Absolute or user-home-relative directory path.
+        """
+        return await asyncio.to_thread(self.capabilities.list_directory, path)
+
+    @function_tool()
+    async def read_text_file(
+        self,
+        context: RunContext,
+        path: str,
+    ) -> str:
+        """Read a small UTF-8 text file after UI approval.
+
+        Args:
+            path: Absolute or user-home-relative text file path.
+        """
+        return await asyncio.to_thread(self.capabilities.read_text_file, path)
+
+    @function_tool()
+    async def write_text_file(
+        self,
+        context: RunContext,
+        path: str,
+        content: str,
+        overwrite: bool = False,
+    ) -> str:
+        """Create or explicitly overwrite a UTF-8 text file after UI approval.
+
+        Args:
+            path: Absolute or user-home-relative output path.
+            content: Complete text to write.
+            overwrite: True only when replacing an existing file was requested.
+        """
+        return await asyncio.to_thread(
+            self.capabilities.write_text_file,
+            path,
+            content,
+            overwrite,
+        )
+
+    @function_tool()
+    async def create_folder(
+        self,
+        context: RunContext,
+        path: str,
+    ) -> str:
+        """Create one folder after UI approval.
+
+        Args:
+            path: Absolute or user-home-relative folder path.
+        """
+        return await asyncio.to_thread(self.capabilities.create_folder, path)
+
+    @function_tool()
+    async def rename_path(
+        self,
+        context: RunContext,
+        source: str,
+        destination: str,
+    ) -> str:
+        """Rename or move a file or folder after UI approval.
+
+        Args:
+            source: Existing file or folder path.
+            destination: New path that does not already exist.
+        """
+        return await asyncio.to_thread(
+            self.capabilities.rename_path,
+            source,
+            destination,
+        )
+
+    @function_tool()
+    async def open_path(
+        self,
+        context: RunContext,
+        path: str,
+    ) -> str:
+        """Open a local file or folder with its Windows default application.
+
+        Args:
+            path: Existing non-sensitive file or folder path.
+        """
+        return await asyncio.to_thread(self.capabilities.open_path, path)
 
     @function_tool()
     async def run_terminal(
@@ -300,14 +543,14 @@ async def entrypoint(ctx: JobContext) -> None:
     prefix_padding_ms = int(
         os.getenv(
             "LIVEKIT_PREFIX_PADDING_MS",
-            "100",
+            "50",
         )
     )
 
     silence_duration_ms = int(
         os.getenv(
             "LIVEKIT_SILENCE_DURATION_MS",
-            "400",
+            "200",
         )
     )
 
@@ -377,6 +620,8 @@ async def entrypoint(ctx: JobContext) -> None:
         WindowsComputer(),
         SecurityManager(settings.log_dir / "audit.jsonl"),
         ui_state,
+        PresentationBuilder(settings.presentation_dir),
+        FileWorkspace(),
     )
 
     # ---------------------------------------------------------------

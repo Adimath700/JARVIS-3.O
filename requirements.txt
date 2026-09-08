@@ -6,8 +6,10 @@ psutil>=7.0.0
 pywin32>=311; platform_system == "Windows"
 pyautogui>=0.9.54; platform_system == "Windows"
 pynput>=1.8.1; platform_system == "Windows"
+pywinauto==0.6.9; platform_system == "Windows"
 faster-whisper>=1.2.0
 sounddevice>=0.5.2
 soundfile>=0.13.1
 piper-tts>=1.4.1
 numpy>=2.0.0
+python-pptx==1.0.2

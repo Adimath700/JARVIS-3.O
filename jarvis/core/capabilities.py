@@ -13,6 +13,8 @@ class JarvisCapabilities:
         computer,
         security,
         ui_state,
+        presentations=None,
+        files=None,
     ):
         self.memory = memory
         self.vision = vision
@@ -20,6 +22,8 @@ class JarvisCapabilities:
         self.computer = computer
         self.security = security
         self.ui_state = ui_state
+        self.presentations = presentations
+        self.files = files
         self.approval_timeout = float(
             os.getenv("JARVIS_APPROVAL_TIMEOUT_SECONDS", "45")
         )
@@ -78,6 +82,166 @@ class JarvisCapabilities:
             "keyboard.press",
             f"Press the {normalized} key",
             lambda: self.computer.press(normalized),
+        )
+
+    def press_hotkey(self, keys: list[str]) -> str:
+        normalized = [key.strip().lower() for key in keys if key.strip()]
+        return self._execute(
+            "keyboard.hotkey",
+            f"Press {' + '.join(normalized)}",
+            lambda: self.computer.hotkey(normalized),
+        )
+
+    def move_mouse(self, x: int, y: int) -> str:
+        return self._execute(
+            "mouse.move",
+            f"Move the pointer to {x}, {y}",
+            lambda: self.computer.move_mouse(x, y),
+        )
+
+    def click_mouse(self, x: int, y: int, button: str = "left") -> str:
+        normalized = button.strip().lower()
+        return self._execute(
+            "mouse.click",
+            f"Click {normalized} at {x}, {y}",
+            lambda: self.computer.click_mouse(x, y, normalized),
+        )
+
+    def scroll_mouse(self, amount: int) -> str:
+        return self._execute(
+            "mouse.scroll",
+            f"Scroll {amount} steps",
+            lambda: self.computer.scroll_mouse(amount),
+        )
+
+    def focus_window(self, title: str) -> str:
+        normalized = title.strip()
+        return self._execute(
+            "window.focus",
+            f'Focus a window matching "{normalized}"',
+            lambda: self.computer.focus_window(normalized),
+        )
+
+    def send_whatsapp_message(self, phone_number: str, message: str) -> str:
+        preview = message.strip().replace("\n", " ")[:140]
+        return self._execute(
+            "communication.send",
+            f'Send WhatsApp message to {phone_number}: "{preview}"',
+            lambda: self.computer.send_whatsapp_message(phone_number, message),
+        )
+
+    def start_whatsapp_call(
+        self,
+        phone_number: str,
+        video: bool = False,
+    ) -> str:
+        call_type = "video" if video else "voice"
+        return self._execute(
+            "communication.call",
+            f"Start WhatsApp {call_type} call with {phone_number}",
+            lambda: self.computer.start_whatsapp_call(phone_number, video),
+        )
+
+    def create_presentation(
+        self,
+        title: str,
+        outline: str,
+        subtitle: str = "",
+        filename: str = "",
+    ) -> str:
+        if self.presentations is None:
+            return "Presentation creation is not configured."
+        slide_count = len(
+            [
+                section
+                for section in outline.split("---")
+                if section.strip()
+            ]
+        )
+
+        def create() -> str:
+            output = self.presentations.create(
+                title,
+                outline,
+                subtitle,
+                filename,
+            )
+            return f"Created the presentation at {output}."
+
+        return self._execute(
+            "file.write",
+            f'Create a {slide_count + 1}-slide presentation titled "{title}"',
+            create,
+        )
+
+    def list_directory(self, path: str) -> str:
+        if self.files is None:
+            return "File access is not configured."
+        normalized = path.strip()
+        return self._execute(
+            "file.list",
+            f"List files in {normalized}",
+            lambda: self.files.list_directory(normalized),
+        )
+
+    def read_text_file(self, path: str) -> str:
+        if self.files is None:
+            return "File access is not configured."
+        normalized = path.strip()
+        return self._execute(
+            "file.read",
+            f"Read text file {normalized}",
+            lambda: self.files.read_text(normalized),
+        )
+
+    def write_text_file(
+        self,
+        path: str,
+        content: str,
+        overwrite: bool = False,
+    ) -> str:
+        if self.files is None:
+            return "File access is not configured."
+        normalized = path.strip()
+        verb = "Overwrite" if overwrite else "Create"
+        return self._execute(
+            "file.write",
+            f"{verb} text file {normalized}",
+            lambda: self.files.write_text(normalized, content, overwrite),
+        )
+
+    def create_folder(self, path: str) -> str:
+        if self.files is None:
+            return "File access is not configured."
+        normalized = path.strip()
+        return self._execute(
+            "file.write",
+            f"Create folder {normalized}",
+            lambda: self.files.create_folder(normalized),
+        )
+
+    def rename_path(self, source: str, destination: str) -> str:
+        if self.files is None:
+            return "File access is not configured."
+        normalized_source = source.strip()
+        normalized_destination = destination.strip()
+        return self._execute(
+            "file.rename",
+            f"Rename {normalized_source} to {normalized_destination}",
+            lambda: self.files.rename(
+                normalized_source,
+                normalized_destination,
+            ),
+        )
+
+    def open_path(self, path: str) -> str:
+        if self.files is None:
+            return "File access is not configured."
+        normalized = path.strip()
+        return self._execute(
+            "file.open",
+            f"Open {normalized}",
+            lambda: self.files.open_path(normalized),
         )
 
     def run_terminal(self, command: str) -> str:
