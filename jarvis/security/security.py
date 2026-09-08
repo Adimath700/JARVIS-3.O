@@ -54,12 +54,23 @@ class SecurityManager:
             return Risk.CRITICAL
         return Risk.MEDIUM
 
-    def authorize(self, action: str, interactive=True) -> Decision:
+    def authorize(
+        self,
+        action: str,
+        interactive=True,
+        approved: bool | None = None,
+    ) -> Decision:
         risk = self.classify(action)
         if risk == Risk.LOW:
             decision = Decision(True, risk, "low-risk action")
         elif risk == Risk.CRITICAL:
             decision = Decision(False, risk, "critical action is disabled by default")
+        elif approved is not None:
+            decision = Decision(
+                approved,
+                risk,
+                "user approval" if approved else "user denied",
+            )
         elif interactive:
             answer = (
                 input(

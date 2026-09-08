@@ -18,5 +18,9 @@ if ($Mode -eq 'console' -and $Text) {
     $AgentArgs += '--text'
 }
 
+if ($Mode -in @('dev', 'start')) {
+    Write-Host 'Starting JARVIS voice agent and holographic UI...'
+}
+
 & $Python @AgentArgs
 exit $LASTEXITCODE

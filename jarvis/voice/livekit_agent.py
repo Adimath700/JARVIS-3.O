@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
+from jarvis.brain.gemini_vision import GeminiVision
+from jarvis.computer.windows import WindowsComputer
+from jarvis.config.settings import Settings
+from jarvis.core.capabilities import JarvisCapabilities
+from jarvis.memory.memory import Memory
+from jarvis.security.security import SecurityManager
+from jarvis.ui.state import ui_state
+from jarvis.vision.screen import ScreenVision
 
 ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env")
@@ -17,11 +27,16 @@ try:
         Agent,
         AgentServer,
         AgentSession,
+        JobExecutorType,
         JobContext,
+        RunContext,
         cli,
+        function_tool,
+        llm,
         room_io,
     )
     from livekit.plugins import google
+    from jarvis.ui.server import start_ui_server
 except ImportError as exc:
     raise SystemExit(
         "LiveKit voice dependencies are missing.\n"
@@ -102,6 +117,14 @@ ROLE
 You are JARVIS: a personal assistant and companion who helps the user with
 their computer, projects, studies, ideas, and everyday tasks.
 
+COMPUTER TOOLS
+- Use a tool only when the user has clearly asked for the related action.
+- Never claim an action succeeded until the tool reports success.
+- Opening apps, screen inspection, and memory use are automatically permitted.
+- Typing, key presses, and terminal commands require approval in the JARVIS UI.
+- If an action is denied or times out, say so briefly and do not retry it.
+- Never invent a tool result.
+
 Be useful first.
 Be natural second.
 Never sacrifice natural conversation for unnecessary verbosity.
@@ -113,9 +136,116 @@ Never sacrifice natural conversation for unnecessary verbosity.
 # ---------------------------------------------------------------------------
 
 class JarvisVoiceAgent(Agent):
-    def __init__(self) -> None:
+    def __init__(self, capabilities: JarvisCapabilities) -> None:
+        self.capabilities = capabilities
         super().__init__(
             instructions=JARVIS_INSTRUCTIONS,
+        )
+
+    @function_tool()
+    async def open_application(
+        self,
+        context: RunContext,
+        application: str,
+    ) -> str:
+        """Open an installed Windows application by name.
+
+        Args:
+            application: The application name, such as Chrome or VS Code.
+        """
+        return await asyncio.to_thread(
+            self.capabilities.open_application,
+            application,
+        )
+
+    @function_tool()
+    async def type_text(
+        self,
+        context: RunContext,
+        text: str,
+    ) -> str:
+        """Type text into the currently focused application after UI approval.
+
+        Args:
+            text: The exact text to type.
+        """
+        return await asyncio.to_thread(self.capabilities.type_text, text)
+
+    @function_tool()
+    async def press_key(
+        self,
+        context: RunContext,
+        key: str,
+    ) -> str:
+        """Press one keyboard key after UI approval.
+
+        Args:
+            key: A pyautogui key name, such as enter, tab, or escape.
+        """
+        return await asyncio.to_thread(self.capabilities.press_key, key)
+
+    @function_tool()
+    async def run_terminal(
+        self,
+        context: RunContext,
+        command: str,
+    ) -> str:
+        """Run a terminal command after the user approves it in the JARVIS UI.
+
+        Args:
+            command: The exact Windows terminal command to run.
+        """
+        return await asyncio.to_thread(
+            self.capabilities.run_terminal,
+            command,
+        )
+
+    @function_tool()
+    async def inspect_screen(
+        self,
+        context: RunContext,
+        question: str,
+    ) -> str:
+        """Capture and analyze the current desktop screen.
+
+        Args:
+            question: What to identify or explain from the screen.
+        """
+        return await asyncio.to_thread(
+            self.capabilities.inspect_screen,
+            question,
+        )
+
+    @function_tool()
+    async def remember_information(
+        self,
+        context: RunContext,
+        information: str,
+    ) -> str:
+        """Store useful information in the user's local JARVIS memory.
+
+        Args:
+            information: The information the user asked JARVIS to remember.
+        """
+        return await asyncio.to_thread(
+            self.capabilities.remember,
+            information,
+        )
+
+    @function_tool()
+    async def search_memory(
+        self,
+        context: RunContext,
+        query: str,
+    ) -> str:
+        """Search the user's local JARVIS memory.
+
+        Args:
+            query: Words or a topic to search for.
+        """
+        return await asyncio.to_thread(
+            self.capabilities.search_memory,
+            query,
         )
 
 
@@ -123,7 +253,7 @@ class JarvisVoiceAgent(Agent):
 # LiveKit server
 # ---------------------------------------------------------------------------
 
-server = AgentServer()
+server = AgentServer(job_executor_type=JobExecutorType.THREAD)
 
 
 @server.rtc_session(
@@ -133,6 +263,7 @@ async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {
         "room": ctx.room.name,
     }
+    ui_state.set_agent_state("initializing")
 
     google_api_key = os.getenv("GOOGLE_API_KEY")
 
@@ -212,6 +343,42 @@ async def entrypoint(ctx: JobContext) -> None:
         llm=realtime_model,
     )
 
+    @session.on("agent_state_changed")
+    def on_agent_state_changed(event) -> None:
+        ui_state.set_agent_state(event.new_state)
+
+    @session.on("user_input_transcribed")
+    def on_user_input_transcribed(event) -> None:
+        if event.is_final:
+            ui_state.set_user_transcript(event.transcript)
+
+    @session.on("conversation_item_added")
+    def on_conversation_item_added(event) -> None:
+        if (
+            isinstance(event.item, llm.ChatMessage)
+            and event.item.role == "assistant"
+        ):
+            ui_state.set_assistant_transcript(event.item.text_content)
+
+    @session.on("error")
+    def on_error(event) -> None:
+        ui_state.set_error(str(event.error))
+
+    @session.on("close")
+    def on_close(event) -> None:
+        ui_state.set_agent_state("offline")
+
+    settings = Settings()
+    settings.ensure_dirs()
+    capabilities = JarvisCapabilities(
+        Memory(settings.memory_file),
+        ScreenVision(settings.screen_dir),
+        GeminiVision(settings.google_api_key, settings.gemini_vision_model),
+        WindowsComputer(),
+        SecurityManager(settings.log_dir / "audit.jsonl"),
+        ui_state,
+    )
+
     # ---------------------------------------------------------------
     # Start audio session
     #
@@ -220,7 +387,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # ---------------------------------------------------------------
 
     await session.start(
-        agent=JarvisVoiceAgent(),
+        agent=JarvisVoiceAgent(capabilities),
         room=ctx.room,
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
@@ -254,5 +421,19 @@ async def entrypoint(ctx: JobContext) -> None:
 # Run
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+def run() -> None:
+    command = next(
+        (
+            argument
+            for argument in sys.argv[1:]
+            if argument in {"console", "dev", "start", "connect"}
+        ),
+        "",
+    )
+    if command in {"console", "dev", "start", "connect"}:
+        start_ui_server(open_browser=command in {"dev", "start", "connect"})
     cli.run_app(server)
+
+
+if __name__ == "__main__":
+    run()

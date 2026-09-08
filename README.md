@@ -12,10 +12,8 @@ A Windows-first, Python-native foundation for a personal AI desktop assistant.
 - Security/risk gates and audit log
 - Persistent JSON memory
 - CLI assistant loop
-- Optional LiveKit/Gemini Live voice adapter scaffold
-
-## Important
-This build is intentionally Python-only for the assistant runtime. The holographic web UI is not part of this core build; it can be attached later as a UI client.
+- LiveKit/Gemini native audio with secured computer-control tools
+- Voice-reactive holographic web UI with hold-to-talk
 
 ## Quick start (Windows)
 ```powershell
@@ -63,11 +61,19 @@ Direct CLI commands:
 - `/exit`
 
 ## Security
-The model never decides whether an action is safe. The security manager classifies actions and requires approval for medium/high/critical actions. Destructive terminal commands and file deletion are blocked by default.
+The model never decides whether an action is safe. The security manager
+classifies actions and writes every decision to the local audit log. Opening
+apps, screen inspection, and memory are low risk. Typing, key presses, and
+terminal commands pause the voice tool and show an **Allow once / Deny**
+confirmation in the JARVIS UI. Critical actions remain disabled.
 
-## Natural Voice System
+## Natural Voice + Holographic UI
 
-JARVIS uses LiveKit Agents with Gemini native audio for the natural voice path. The current voice configuration keeps Gemini 2.5 native audio because it supports affective dialogue, while screen vision can use a separate Gemini model.
+JARVIS uses LiveKit Agents with Gemini native audio for the natural voice
+path. The current voice configuration keeps Gemini 2.5 native audio because
+it supports affective dialogue, while screen vision can use a separate Gemini
+model. The voice agent can open applications, understand the current screen,
+use local memory, and perform approval-gated keyboard or terminal actions.
 
 Required `.env` values:
 
@@ -81,6 +87,9 @@ Required `.env` values:
 - `LIVEKIT_GEMINI_AFFECTIVE_DIALOG=true`
 - `LIVEKIT_PREFIX_PADDING_MS=100`
 - `LIVEKIT_SILENCE_DURATION_MS=400`
+- `JARVIS_UI_PORT=8765`
+- `JARVIS_UI_AUTO_OPEN=true`
+- `JARVIS_APPROVAL_TIMEOUT_SECONDS=45`
 
 The LiveKit silence duration controls how quickly JARVIS responds after you
 finish speaking. Increase it if natural pauses are being cut off.
@@ -110,6 +119,28 @@ To connect the agent to your LiveKit project, configure `LIVEKIT_URL`,
 ```powershell
 .\scripts\run_livekit_agent.ps1 -Mode dev
 ```
+
+The launcher starts the local UI server and opens the holographic interface at
+`http://127.0.0.1:8765`. Click **Connect JARVIS** once, allow microphone access,
+then hold the central control (or hold Space) while speaking. The UI responds
+to listening, thinking, speaking, tool, approval, and error states. Agent audio
+drives the core animation in real time.
+
+The UI creates a unique LiveKit room for each connection and dispatches the
+configured `LIVEKIT_AGENT_NAME` into it. Keep the `dev` process running while
+using the interface.
+
+Voice tool examples:
+
+- “Open Visual Studio Code.”
+- “What is visible on my screen?”
+- “Remember that my project uses Python 3.11.”
+- “Type this message into the active window.” (approval required)
+- “Press Enter.” (approval required)
+- “Run `dir` in the terminal.” (approval required)
+
+The UI server binds only to `127.0.0.1`. LiveKit credentials stay in the Python
+process and the browser receives only a short-lived room participant token.
 
 ## LiveKit CLI
 
