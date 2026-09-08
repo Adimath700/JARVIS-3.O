@@ -180,7 +180,9 @@ success. WhatsApp additionally polls for its accessible controls, waits for the
 selected chat composer, and refreshes the control tree while looking for call
 buttons. If accessibility cannot find a call control, JARVIS takes a fresh
 screenshot, visually locates the requested call button, clicks it, and confirms
-that a WhatsApp call window appeared.
+that a WhatsApp call window appeared. The accessibility lookup uses a short
+fast path so unsupported WhatsApp versions reach visual fallback quickly;
+adjust the `JARVIS_WHATSAPP_*_SECONDS` values in `.env` for slower computers.
 
 For other visual navigation, `click_visible_target` captures the current screen
 for each requested action, grounds the named control to current coordinates,

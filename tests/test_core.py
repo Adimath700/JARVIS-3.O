@@ -2,7 +2,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 from jarvis.brain.gemini_vision import GeminiVision
@@ -272,8 +272,9 @@ def test_whatsapp_detects_modern_composer_and_video_labels():
     composer.window_text.return_value = "Type a message to Priya"
     composer.element_info.name = ""
     video = Mock()
-    video.window_text.return_value = "Video"
+    video.window_text.return_value = ""
     video.element_info.name = ""
+    video.element_info.automation_id = "VideoCallButton"
     window = Mock()
 
     def descendants(*, control_type):
@@ -295,6 +296,43 @@ def test_whatsapp_detects_modern_composer_and_video_labels():
         )
         is video
     )
+
+
+def test_whatsapp_control_lookup_scans_accessibility_tree_once():
+    computer = WindowsComputer()
+    edit = Mock()
+    edit.element_info.control_type = "Edit"
+    button = Mock()
+    button.element_info.control_type = "Button"
+    window = Mock()
+    window.descendants.return_value = [edit, button]
+    assert computer._window_controls(window, ("Button",)) == [button]
+    window.descendants.assert_called_once_with()
+
+
+def test_whatsapp_contact_search_uses_keyboard_fast_path():
+    computer = WindowsComputer()
+    search = Mock()
+    input_driver = Mock()
+    with (
+        patch.object(
+            computer,
+            "_wait_until",
+            side_effect=(search, None),
+        ),
+        patch.object(computer, "_click_control", return_value=True),
+        patch.object(computer, "_paste_text") as paste,
+        patch.object(
+            computer,
+            "_wait_for_whatsapp_ready",
+            return_value=Mock(),
+        ),
+        patch("jarvis.computer.windows.pyautogui", input_driver),
+    ):
+        assert computer._search_whatsapp_contact("Priya") is True
+    paste.assert_called_once_with("Priya")
+    assert input_driver.press.call_args_list == [call("down"), call("enter")]
+    assert call("ctrl", "n") not in input_driver.hotkey.call_args_list
 
 
 def test_whatsapp_video_call_uses_accessible_button():
@@ -319,6 +357,22 @@ def test_whatsapp_video_call_uses_accessible_button():
         result = computer.start_whatsapp_call("Priya", video=True)
     assert result == "Started a WhatsApp video call with Priya."
     click.assert_called_once_with(call_button)
+
+
+def test_whatsapp_call_uses_short_accessibility_fast_path():
+    computer = WindowsComputer()
+    with (
+        patch.object(computer, "_require_input"),
+        patch.object(
+            computer,
+            "_open_whatsapp_conversation",
+            return_value=("Priya", True, False),
+        ),
+        patch.object(computer, "_wait_until", return_value=None) as wait,
+    ):
+        result = computer.start_whatsapp_call("Priya", video=True)
+    assert "could not find or confirm its video call control" in result
+    assert wait.call_args.args[1] == 2
 
 
 def test_whatsapp_call_uses_visual_fallback_and_confirms_window():
@@ -358,7 +412,7 @@ def test_whatsapp_call_uses_visual_fallback_and_confirms_window():
         "Started a WhatsApp video call with Priya and confirmed the call window."
     )
     computer.click_mouse.assert_called_once_with(1727, 108)
-    computer.wait_for_whatsapp_call.assert_called_once_with(6)
+    computer.wait_for_whatsapp_call.assert_called_once_with(4)
 
 
 def test_youtube_search_waits_for_loaded_page():
@@ -580,7 +634,10 @@ if __name__ == "__main__":
     test_whatsapp_accepts_contact_names_and_phone_numbers()
     test_whatsapp_message_focuses_composer_and_verifies_send()
     test_whatsapp_detects_modern_composer_and_video_labels()
+    test_whatsapp_control_lookup_scans_accessibility_tree_once()
+    test_whatsapp_contact_search_uses_keyboard_fast_path()
     test_whatsapp_video_call_uses_accessible_button()
+    test_whatsapp_call_uses_short_accessibility_fast_path()
     test_whatsapp_call_uses_visual_fallback_and_confirms_window()
     test_youtube_search_waits_for_loaded_page()
     test_system_status_reports_battery_and_usage()

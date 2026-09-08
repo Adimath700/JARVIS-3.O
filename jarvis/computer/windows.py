@@ -39,6 +39,10 @@ class WindowsComputer:
         r"\b(os\.remove|os\.unlink|shutil\.rmtree)\b",
     )
 
+    def __init__(self):
+        self._cached_whatsapp_handle = None
+        self._cached_whatsapp_window = None
+
     def _require_windows(self):
         if os.name != "nt":
             raise RuntimeError("This action is available only on Windows")
@@ -410,7 +414,7 @@ class WindowsComputer:
 
     def _launch_whatsapp(self):
         timeout = float(os.getenv("JARVIS_WHATSAPP_LOAD_SECONDS", "10"))
-        if "whatsapp" not in self.active_window_title().casefold():
+        if self._matching_window_handle("whatsapp") is None:
             self._start_search_and_open("WhatsApp", timeout)
         if self._wait_for_whatsapp_ready(timeout):
             return True
@@ -428,18 +432,31 @@ class WindowsComputer:
             return None
         handle = self._matching_window_handle("whatsapp")
         if handle is None:
+            self._cached_whatsapp_handle = None
+            self._cached_whatsapp_window = None
             return None
+        if (
+            handle == self._cached_whatsapp_handle
+            and self._cached_whatsapp_window is not None
+        ):
+            return self._cached_whatsapp_window
         if Desktop is not None:
             try:
-                return Desktop(backend="uia").window(handle=handle)
+                window = Desktop(backend="uia").window(handle=handle)
+                self._cached_whatsapp_handle = handle
+                self._cached_whatsapp_window = window
+                return window
             except Exception:
                 pass
         if Application is None:
             return None
         try:
-            return Application(backend="uia").connect(handle=handle).window(
+            window = Application(backend="uia").connect(handle=handle).window(
                 handle=handle
             )
+            self._cached_whatsapp_handle = handle
+            self._cached_whatsapp_window = window
+            return window
         except Exception:
             return None
 
@@ -478,6 +495,14 @@ class WindowsComputer:
                 labels.append(name)
         except Exception:
             pass
+        try:
+            automation_id = control.element_info.automation_id
+            if isinstance(automation_id, str):
+                automation_id = automation_id.strip()
+                if automation_id and automation_id not in labels:
+                    labels.append(automation_id)
+        except Exception:
+            pass
         return "\n".join(labels)
 
     def _control_text(self, control):
@@ -507,6 +532,23 @@ class WindowsComputer:
     def _window_controls(window, control_types):
         if window is None:
             return []
+        expected = set(control_types)
+        try:
+            descendants = window.descendants()
+            controls = []
+            typed = False
+            for control in descendants:
+                try:
+                    control_type = control.element_info.control_type
+                    typed = True
+                except Exception:
+                    continue
+                if control_type in expected:
+                    controls.append(control)
+            if typed or not descendants:
+                return controls
+        except Exception:
+            pass
         controls = []
         for control_type in control_types:
             try:
@@ -516,21 +558,20 @@ class WindowsComputer:
         return controls
 
     def _whatsapp_message_box(self, window):
-        return next(
-            (
-                control
-                for control in self._window_controls(
-                    window,
-                    ("Edit", "Document"),
-                )
-                if any(
-                    term in self._control_label(control).casefold()
+        for control in self._window_controls(
+            window,
+            ("Edit", "Document"),
+        ):
+            label = self._control_label(control).casefold()
+            if (
+                any(
+                    term in label
                     for term in ("type a message", "compose", "message to")
                 )
-                and "search" not in self._control_label(control).casefold()
-            ),
-            None,
-        )
+                and "search" not in label
+            ):
+                return control
+        return None
 
     def _focus_whatsapp_composer(self, window):
         message_box = self._whatsapp_message_box(window)
@@ -579,6 +620,12 @@ class WindowsComputer:
 
     def _search_whatsapp_contact(self, contact):
         timeout = float(os.getenv("JARVIS_WHATSAPP_CONTROL_SECONDS", "12"))
+        search_timeout = float(
+            os.getenv("JARVIS_WHATSAPP_SEARCH_SECONDS", "2.5")
+        )
+        chat_timeout = float(
+            os.getenv("JARVIS_WHATSAPP_CHAT_SECONDS", "6")
+        )
 
         def find_search():
             window = self._whatsapp_window()
@@ -591,7 +638,7 @@ class WindowsComputer:
                     return control
             return None
 
-        search = self._wait_until(find_search, timeout)
+        search = self._wait_until(find_search, min(timeout, search_timeout))
         if search is not None and self._click_control(search):
             pyautogui.hotkey("ctrl", "a")
             self._paste_text(contact)
@@ -603,33 +650,47 @@ class WindowsComputer:
                     window,
                     ("ListItem", "Button", "Text"),
                 ):
-                    normalized = self._control_text(control).casefold()
+                    normalized = self._control_label(control).casefold()
+                    try:
+                        is_list_item = (
+                            control.element_info.control_type == "ListItem"
+                        )
+                    except Exception:
+                        is_list_item = False
+                    if is_list_item and not normalized:
+                        normalized = self._control_text(control).casefold()
                     if normalized == target or normalized.startswith(
                         f"{target}\n"
                     ):
                         return self._click_control(control)
                 return False
 
-            if self._wait_until(select_match, timeout):
-                return (
-                    self._wait_for_whatsapp_ready(
-                        timeout,
-                        require_chat=True,
-                    )
-                    is not None
-                )
+            selected = bool(
+                self._wait_until(select_match, search_timeout)
+            )
+            if not selected:
+                pyautogui.press("down")
+                pyautogui.press("enter")
+            if self._wait_for_whatsapp_ready(
+                chat_timeout,
+                require_chat=True,
+            ):
+                return True
 
         pyautogui.hotkey("ctrl", "n")
-        fallback_search = self._wait_until(find_search, min(timeout, 3))
+        fallback_search = self._wait_until(
+            find_search,
+            min(search_timeout, 2),
+        )
         if fallback_search is not None:
             self._click_control(fallback_search)
         self._paste_text(contact)
-        time.sleep(0.5)
+        time.sleep(0.25)
         pyautogui.press("down")
         pyautogui.press("enter")
         return (
             self._wait_for_whatsapp_ready(
-                timeout,
+                chat_timeout,
                 require_chat=True,
             )
             is not None
@@ -770,7 +831,10 @@ class WindowsComputer:
             else ("video", "group", "end call", "hang up")
         )
         control_timeout = float(
-            os.getenv("JARVIS_WHATSAPP_CONTROL_SECONDS", "12")
+            os.getenv("JARVIS_WHATSAPP_CALL_BUTTON_SECONDS", "2")
+        )
+        confirm_timeout = float(
+            os.getenv("JARVIS_WHATSAPP_CALL_CONFIRM_SECONDS", "4")
         )
 
         def click_call_control():
@@ -789,8 +853,12 @@ class WindowsComputer:
             control_timeout,
         )
         if triggered:
-            if self.wait_for_whatsapp_call(6):
+            if self.wait_for_whatsapp_call(confirm_timeout):
                 return f"Started a WhatsApp {call_type} call with {target}."
+            return (
+                f"Clicked the WhatsApp {call_type} call control for {target}, "
+                "but no call window appeared, so the call is not confirmed."
+            )
         return (
             f"Opened the WhatsApp chat for {target}, but could not find or "
             f"confirm its {call_type} call control."

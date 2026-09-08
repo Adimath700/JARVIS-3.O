@@ -221,7 +221,7 @@ class JarvisCapabilities:
 
         def start() -> str:
             result = self.computer.start_whatsapp_call(recipient, video)
-            if result.startswith("Started "):
+            if result.startswith(("Started ", "Clicked ")):
                 return result
             target = (
                 "WhatsApp video call camera button in the open chat header"
@@ -236,7 +236,10 @@ class JarvisCapabilities:
                 return f"{result} The button was also not visible in a fresh screenshot."
             _, _, x, y = grounded
             self.computer.click_mouse(x, y)
-            if self.computer.wait_for_whatsapp_call(6):
+            confirm_timeout = float(
+                os.getenv("JARVIS_WHATSAPP_CALL_CONFIRM_SECONDS", "4")
+            )
+            if self.computer.wait_for_whatsapp_call(confirm_timeout):
                 return (
                     f"Started a WhatsApp {call_type} call with {recipient} "
                     "and confirmed the call window."
