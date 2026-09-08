@@ -1,4 +1,5 @@
 import os
+import time
 from collections.abc import Callable
 
 
@@ -66,6 +67,28 @@ class JarvisCapabilities:
             lambda: self.computer.open_app(name),
         )
 
+    def search_youtube(self, query: str, browser: str = "") -> str:
+        terms = query.strip()
+        requested_browser = browser.strip()
+        description = f'Search YouTube for "{terms}"'
+        if requested_browser:
+            description += f" in {requested_browser}"
+        return self._execute(
+            "browser.open",
+            description,
+            lambda: self.computer.search_youtube(
+                terms,
+                requested_browser,
+            ),
+        )
+
+    def get_system_status(self) -> str:
+        return self._execute(
+            "system.info",
+            "Reading battery and system status",
+            self.computer.system_status,
+        )
+
     def type_text(self, text: str) -> str:
         preview = text.strip().replace("\n", " ")[:120]
         return self._execute(
@@ -105,6 +128,67 @@ class JarvisCapabilities:
             lambda: self.computer.click_mouse(x, y, normalized),
         )
 
+    def _visible_target_location(self, target):
+        snapshot = self.vision.snapshot(primary=True)
+        location = self.gemini.locate(snapshot["image"], target)
+        if location is None:
+            return None
+        minimum_confidence = float(
+            os.getenv("JARVIS_VISUAL_MIN_CONFIDENCE", "0.55")
+        )
+        if location["confidence"] < minimum_confidence:
+            return None
+        x = snapshot["left"] + round(
+            location["x"] * max(snapshot["width"] - 1, 0) / 1000
+        )
+        y = snapshot["top"] + round(
+            location["y"] * max(snapshot["height"] - 1, 0) / 1000
+        )
+        return snapshot, location, x, y
+
+    def click_visible_target(self, target: str) -> str:
+        description = target.strip()
+        if not description:
+            raise ValueError("A visible click target is required")
+
+        def click() -> str:
+            grounded = self._visible_target_location(description)
+            if grounded is None:
+                return f'I could not see an enabled target matching "{description}".'
+            before, location, x, y = grounded
+            self.computer.click_mouse(x, y)
+            threshold = float(
+                os.getenv("JARVIS_VISUAL_CHANGE_THRESHOLD", "0.008")
+            )
+            timeout = float(
+                os.getenv("JARVIS_VISUAL_CONFIRM_SECONDS", "3")
+            )
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                time.sleep(0.25)
+                after = self.vision.snapshot(primary=True)
+                if (
+                    self.vision.difference_ratio(
+                        before["image"],
+                        after["image"],
+                    )
+                    >= threshold
+                ):
+                    label = location["label"] or description
+                    return (
+                        f'Clicked "{label}" and confirmed a visible screen change.'
+                    )
+            return (
+                f'Sent a click to "{description}", but the screen did not visibly '
+                "change, so the action is not confirmed."
+            )
+
+        return self._execute(
+            "mouse.click",
+            f'Find and click visible target "{description}"',
+            click,
+        )
+
     def scroll_mouse(self, amount: int) -> str:
         return self._execute(
             "mouse.scroll",
@@ -134,10 +218,39 @@ class JarvisCapabilities:
         video: bool = False,
     ) -> str:
         call_type = "video" if video else "voice"
+
+        def start() -> str:
+            result = self.computer.start_whatsapp_call(recipient, video)
+            if result.startswith("Started "):
+                return result
+            target = (
+                "WhatsApp video call camera button in the open chat header"
+                if video
+                else "WhatsApp voice call phone button in the open chat header"
+            )
+            try:
+                grounded = self._visible_target_location(target)
+            except Exception as exc:
+                return f"{result} Visual fallback was unavailable: {exc}"
+            if grounded is None:
+                return f"{result} The button was also not visible in a fresh screenshot."
+            _, _, x, y = grounded
+            self.computer.click_mouse(x, y)
+            if self.computer.wait_for_whatsapp_call(6):
+                return (
+                    f"Started a WhatsApp {call_type} call with {recipient} "
+                    "and confirmed the call window."
+                )
+            return (
+                f"Clicked the visible WhatsApp {call_type} call button for "
+                f"{recipient}, but no call window appeared, so the call is "
+                "not confirmed."
+            )
+
         return self._execute(
             "communication.call",
             f"Start WhatsApp {call_type} call with {recipient}",
-            lambda: self.computer.start_whatsapp_call(recipient, video),
+            start,
         )
 
     def play_spotify_song(self, song: str, artist: str = "") -> str:

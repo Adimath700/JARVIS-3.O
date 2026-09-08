@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
+from jarvis.brain.gemini_vision import GeminiVision
 from jarvis.brain.ollama import OllamaBrain
 from jarvis.computer.files import FileWorkspace
 from jarvis.computer.windows import WindowsComputer
@@ -121,6 +122,73 @@ def test_voice_capabilities_trusted_mode_skips_approval():
     assert capabilities.type_text("hello") == "Text typed."
     approvals.request_approval.assert_not_called()
     approvals.set_trusted_mode.assert_called_once_with(True)
+
+
+def test_gemini_locator_parses_grounded_coordinates():
+    vision = GeminiVision("key", "model")
+    with patch.object(
+        vision,
+        "analyze",
+        return_value=(
+            '```json\n{"found":true,"x":750,"y":125,'
+            '"confidence":0.93,"label":"Video call"}\n```'
+        ),
+    ):
+        assert vision.locate("screen.png", "video call button") == {
+            "x": 750,
+            "y": 125,
+            "confidence": 0.93,
+            "label": "Video call",
+        }
+
+
+def test_visible_target_click_maps_screen_and_confirms_change():
+    root = Path(tempfile.mkdtemp())
+    computer = Mock()
+    computer.click_mouse.return_value = "Sent a left click."
+    vision = Mock()
+    vision.snapshot.side_effect = (
+        {
+            "image": "before.png",
+            "left": -100,
+            "top": 20,
+            "width": 2000,
+            "height": 1000,
+        },
+        {
+            "image": "after.png",
+            "left": -100,
+            "top": 20,
+            "width": 2000,
+            "height": 1000,
+        },
+    )
+    vision.difference_ratio.return_value = 0.1
+    gemini = Mock()
+    gemini.locate.return_value = {
+        "x": 750,
+        "y": 125,
+        "confidence": 0.93,
+        "label": "Video call",
+    }
+    approvals = Mock()
+    approvals.snapshot.return_value = {"status": "idle"}
+    capabilities = JarvisCapabilities(
+        Memory(root / "memory.json"),
+        vision,
+        gemini,
+        computer,
+        SecurityManager(root / "audit.jsonl", trusted_mode=True),
+        approvals,
+    )
+    with patch("jarvis.core.capabilities.time.sleep"):
+        result = capabilities.click_visible_target(
+            "WhatsApp video call button"
+        )
+    assert result == (
+        'Clicked "Video call" and confirmed a visible screen change.'
+    )
+    computer.click_mouse.assert_called_once_with(1399, 145)
 
 
 def test_whatsapp_requires_approval():
@@ -251,6 +319,97 @@ def test_whatsapp_video_call_uses_accessible_button():
         result = computer.start_whatsapp_call("Priya", video=True)
     assert result == "Started a WhatsApp video call with Priya."
     click.assert_called_once_with(call_button)
+
+
+def test_whatsapp_call_uses_visual_fallback_and_confirms_window():
+    root = Path(tempfile.mkdtemp())
+    computer = Mock()
+    computer.start_whatsapp_call.return_value = (
+        "Opened the WhatsApp chat for Priya, but could not find or confirm "
+        "its video call control."
+    )
+    computer.wait_for_whatsapp_call.return_value = True
+    vision = Mock()
+    vision.snapshot.return_value = {
+        "image": "screen.png",
+        "left": 0,
+        "top": 0,
+        "width": 1920,
+        "height": 1080,
+    }
+    gemini = Mock()
+    gemini.locate.return_value = {
+        "x": 900,
+        "y": 100,
+        "confidence": 0.9,
+        "label": "Video call",
+    }
+    approvals = Mock()
+    approvals.snapshot.return_value = {"status": "idle"}
+    capabilities = JarvisCapabilities(
+        Memory(root / "memory.json"),
+        vision,
+        gemini,
+        computer,
+        SecurityManager(root / "audit.jsonl", trusted_mode=True),
+        approvals,
+    )
+    assert capabilities.start_whatsapp_call("Priya", video=True) == (
+        "Started a WhatsApp video call with Priya and confirmed the call window."
+    )
+    computer.click_mouse.assert_called_once_with(1727, 108)
+    computer.wait_for_whatsapp_call.assert_called_once_with(6)
+
+
+def test_youtube_search_waits_for_loaded_page():
+    computer = WindowsComputer()
+    with (
+        patch.object(computer, "_require_windows"),
+        patch.object(
+            computer,
+            "_browser_executable",
+            return_value="C:/Brave/brave.exe",
+        ),
+        patch.object(computer, "_wait_for_window", return_value=True) as wait,
+        patch("jarvis.computer.windows.subprocess.Popen") as start,
+    ):
+        result = computer.search_youtube("LiveKit agents", "Brave")
+    assert result == (
+        'Searched YouTube for "LiveKit agents" in Brave and confirmed '
+        "the page loaded."
+    )
+    start.assert_called_once_with(
+        [
+            "C:/Brave/brave.exe",
+            "https://www.youtube.com/results?search_query=LiveKit+agents",
+        ]
+    )
+    wait.assert_called_once_with("youtube", 20)
+
+
+def test_system_status_reports_battery_and_usage():
+    computer = WindowsComputer()
+    battery = Mock(percent=78, power_plugged=True)
+    with (
+        patch("jarvis.computer.windows.psutil.sensors_battery", return_value=battery),
+        patch(
+            "jarvis.computer.windows.psutil.virtual_memory",
+            return_value=Mock(percent=42),
+        ),
+        patch(
+            "jarvis.computer.windows.psutil.disk_usage",
+            return_value=Mock(percent=61),
+        ),
+        patch(
+            "jarvis.computer.windows.psutil.cpu_percent",
+            return_value=17,
+        ),
+        patch.object(computer, "active_window_title", return_value="WhatsApp"),
+    ):
+        assert computer.system_status() == (
+            "Battery 78% (plugged in); CPU 17%; memory 42%; disk 61% used; "
+            "active window: WhatsApp."
+        )
 
 
 def test_spotify_quick_search_selects_requested_song():
@@ -415,11 +574,16 @@ if __name__ == "__main__":
     test_voice_capabilities_require_approval()
     test_voice_capabilities_honor_denial()
     test_voice_capabilities_trusted_mode_skips_approval()
+    test_gemini_locator_parses_grounded_coordinates()
+    test_visible_target_click_maps_screen_and_confirms_change()
     test_whatsapp_requires_approval()
     test_whatsapp_accepts_contact_names_and_phone_numbers()
     test_whatsapp_message_focuses_composer_and_verifies_send()
     test_whatsapp_detects_modern_composer_and_video_labels()
     test_whatsapp_video_call_uses_accessible_button()
+    test_whatsapp_call_uses_visual_fallback_and_confirms_window()
+    test_youtube_search_waits_for_loaded_page()
+    test_system_status_reports_battery_and_usage()
     test_spotify_quick_search_selects_requested_song()
     test_spotify_playback_confirmation_uses_now_playing_bar()
     test_spotify_capability_uses_dedicated_media_action()

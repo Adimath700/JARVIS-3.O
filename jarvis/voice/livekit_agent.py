@@ -76,10 +76,20 @@ needed. Default to English and naturally follow another language when useful.
 COMPUTER TOOLS
 - Use a tool only when the user has clearly asked for the related action.
 - Never claim an action succeeded until the tool reports success.
+- Opening, clicking, typing, or submitting is not the same as completing the
+  user's goal. Report the exact verified state from the tool result.
 - Owner mode permits requested mouse, keyboard, WhatsApp, terminal, file, and
   presentation actions without repeated approval prompts.
-- Use inspect_screen before mouse actions when the target coordinates are not
-  already clear. WhatsApp recipients may be saved contact names or numbers.
+- Use click_visible_target for visible buttons, links, fields, and menu items.
+  It takes a fresh screenshot, locates the current target, clicks it, and checks
+  for a visible state change. Use coordinate clicks only when exact coordinates
+  are already known. In multi-step UI tasks, call it separately for each next
+  visible target so every step uses the latest screen. WhatsApp recipients may
+  be saved contact names or numbers.
+- Use search_youtube for YouTube searches instead of opening a browser and
+  typing before the page is ready.
+- Use get_system_status for battery percentage, charging state, CPU, memory,
+  disk usage, or the active window.
 - Use play_spotify_song for requested Spotify tracks instead of generic typing,
   links, terminal paths, or play/pause hotkeys.
 - If WhatsApp opens a chat but cannot complete a call, explain that clearly.
@@ -120,6 +130,35 @@ class JarvisVoiceAgent(Agent):
         return await asyncio.to_thread(
             self.capabilities.open_application,
             application,
+        )
+
+    @function_tool()
+    async def search_youtube(
+        self,
+        context: RunContext,
+        query: str,
+        browser: str = "",
+    ) -> str:
+        """Open a YouTube results page and wait until it visibly loads.
+
+        Args:
+            query: Video, channel, or topic to search for.
+            browser: Optional Chrome, Brave, or Edge preference.
+        """
+        return await asyncio.to_thread(
+            self.capabilities.search_youtube,
+            query,
+            browser,
+        )
+
+    @function_tool()
+    async def get_system_status(
+        self,
+        context: RunContext,
+    ) -> str:
+        """Report battery, charging, CPU, memory, disk, and active-window status."""
+        return await asyncio.to_thread(
+            self.capabilities.get_system_status,
         )
 
     @function_tool()
@@ -196,6 +235,22 @@ class JarvisVoiceAgent(Agent):
             x,
             y,
             button,
+        )
+
+    @function_tool()
+    async def click_visible_target(
+        self,
+        context: RunContext,
+        target: str,
+    ) -> str:
+        """Find a visible UI target on the current screen and click it.
+
+        Args:
+            target: Specific visible control, including its app and nearby label.
+        """
+        return await asyncio.to_thread(
+            self.capabilities.click_visible_target,
+            target,
         )
 
     @function_tool()

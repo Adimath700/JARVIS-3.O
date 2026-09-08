@@ -156,6 +156,9 @@ Voice tool examples:
 - “Send ‘I will arrive at six’ on WhatsApp to Priya.”
 - “Start a WhatsApp video call with Mom.”
 - “Play Blinding Lights by The Weeknd on Spotify.”
+- “Search YouTube for LiveKit tutorials in Brave.”
+- “What is my battery percentage?”
+- “Click the visible video call button.”
 - “Create a five-slide presentation about renewable energy.”
 - “List the files in my Documents folder.”
 - “Open my project presentation.”
@@ -171,6 +174,19 @@ JARVIS reports that it could not confirm the call instead of claiming success.
 Spotify playback uses the official Desktop Quick Search shortcut, searches the
 requested title and optional artist together, selects the top result, and
 checks the now-playing bar when Spotify exposes it to Windows accessibility.
+
+Application and browser tools wait for a matching ready window before reporting
+success. WhatsApp additionally polls for its accessible controls, waits for the
+selected chat composer, and refreshes the control tree while looking for call
+buttons. If accessibility cannot find a call control, JARVIS takes a fresh
+screenshot, visually locates the requested call button, clicks it, and confirms
+that a WhatsApp call window appeared.
+
+For other visual navigation, `click_visible_target` captures the current screen
+for each requested action, grounds the named control to current coordinates,
+then checks for a visible screen change. This provides task-scoped live
+observation without continuously recording or uploading the desktop while
+JARVIS is idle.
 
 Generated presentations are stored in `data/presentations` by default. Change
 `JARVIS_PRESENTATION_DIR` in `.env` to use another folder.

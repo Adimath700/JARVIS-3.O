@@ -1,4 +1,5 @@
 import base64
+import json
 import mimetypes
 from pathlib import Path
 
@@ -155,3 +156,42 @@ class GeminiVision:
             f"Tried: {', '.join(self._candidate_models())}. "
             f"Details: {detail}"
         )
+
+    def locate(self, image_path: str | Path, target: str) -> dict | None:
+        response = self.analyze(
+            image_path,
+            "Locate the requested clickable target in this screenshot: "
+            f"{target}\n"
+            "Return only one JSON object. If visible and enabled, return "
+            '{"found":true,"x":500,"y":500,"confidence":0.95,"label":"..."}. '
+            "x and y must be integer coordinates from 0 to 1000 relative to "
+            "the full screenshot, with 0 at the top or left and 1000 at the "
+            "bottom or right. If it is not clearly visible, return "
+            '{"found":false,"x":0,"y":0,"confidence":0,"label":""}.',
+        )
+        start = response.find("{")
+        end = response.rfind("}")
+        if start < 0 or end <= start:
+            raise RuntimeError("Screen locator returned invalid JSON")
+        try:
+            location = json.loads(response[start : end + 1])
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Screen locator returned invalid JSON") from exc
+        if location.get("found") is not True:
+            return None
+        try:
+            x = int(location["x"])
+            y = int(location["y"])
+            confidence = float(location.get("confidence", 0))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("Screen locator omitted valid coordinates") from exc
+        if not 0 <= x <= 1000 or not 0 <= y <= 1000:
+            raise RuntimeError("Screen locator coordinates were out of range")
+        if not 0 <= confidence <= 1:
+            raise RuntimeError("Screen locator confidence was out of range")
+        return {
+            "x": x,
+            "y": y,
+            "confidence": confidence,
+            "label": str(location.get("label", "")).strip(),
+        }

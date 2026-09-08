@@ -16,6 +16,16 @@ class Jarvis:
             return "I remembered that."
         if low.startswith("open "):
             return self.action("app.open", lambda: self.computer.open_app(text[5:]))
+        if low.startswith("search youtube for "):
+            return self.action(
+                "browser.open",
+                lambda: self.computer.search_youtube(text[19:]),
+            )
+        if (
+            "battery percentage" in low
+            or low in {"battery", "system status", "computer status"}
+        ):
+            return self.action("system.info", self.computer.system_status)
         if (
             "what is on my screen" in low
             or "look at my screen" in low

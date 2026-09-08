@@ -5,7 +5,10 @@ import shutil
 import subprocess
 import time
 import webbrowser
-from urllib.parse import quote
+from pathlib import Path
+from urllib.parse import quote, quote_plus
+
+import psutil
 
 try:
     import pyautogui
@@ -51,14 +54,41 @@ class WindowsComputer:
         window = win32gui.GetForegroundWindow()
         return win32gui.GetWindowText(window)
 
-    def _wait_for_window(self, title: str, timeout: float):
+    @staticmethod
+    def _wait_until(predicate, timeout: float, interval: float = 0.25):
         deadline = time.monotonic() + timeout
-        expected = title.lower()
         while time.monotonic() < deadline:
-            if expected in self.active_window_title().lower():
-                return True
-            time.sleep(0.25)
-        return False
+            try:
+                result = predicate()
+                if result:
+                    return result
+            except Exception:
+                pass
+            time.sleep(interval)
+        return None
+
+    def _matching_window_handle(self, title: str):
+        if win32gui is None:
+            return None
+        expected = title.casefold()
+        active = win32gui.GetForegroundWindow()
+        if expected in win32gui.GetWindowText(active).casefold():
+            return active
+        matches = []
+
+        def collect(handle, results):
+            text = win32gui.GetWindowText(handle)
+            if win32gui.IsWindowVisible(handle) and expected in text.casefold():
+                results.append(handle)
+
+        win32gui.EnumWindows(collect, matches)
+        return matches[0] if matches else None
+
+    def _wait_for_window(self, title: str, timeout: float):
+        return self._wait_until(
+            lambda: self._matching_window_handle(title),
+            timeout,
+        ) is not None
 
     def _start_menu_app_id(self, query: str):
         if os.name != "nt":
@@ -120,17 +150,31 @@ class WindowsComputer:
             "file explorer": "File Explorer",
         }
         display = aliases.get(name.lower(), name)
-        if name.lower() in {"whatsapp", "spotify"} and self._start_search_and_open(
-            display
-        ):
-            return f"Opening {display}."
+        if name.lower() == "whatsapp":
+            return (
+                "Opened WhatsApp and confirmed its controls are ready."
+                if self._launch_whatsapp()
+                else "Started WhatsApp, but its controls did not become ready."
+            )
+        if name.lower() == "spotify":
+            return (
+                "Opened Spotify and confirmed its window is ready."
+                if self._launch_spotify()
+                else "Started Spotify, but its window did not become ready."
+            )
+        timeout = float(os.getenv("JARVIS_APP_LOAD_SECONDS", "15"))
         app_id = self._start_menu_app_id(display)
         if app_id:
             subprocess.Popen(
                 ["explorer.exe", f"shell:AppsFolder\\{app_id}"],
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
-            return f"Opening {display}."
+            if self._wait_for_window(display, timeout):
+                return f"Opened {display} and confirmed its window is ready."
+            return (
+                f"Started {display}, but no matching window appeared within "
+                f"{timeout:g} seconds."
+            )
         exe_alias = {
             "notepad": "notepad.exe",
             "calculator": "calc.exe",
@@ -146,14 +190,102 @@ class WindowsComputer:
             path = shutil.which(exe)
             if path:
                 subprocess.Popen([path])
-                return f"Opening {display}."
+                if self._wait_for_window(display, timeout):
+                    return f"Opened {display} and confirmed its window is ready."
+                return (
+                    f"Started {display}, but no matching window appeared within "
+                    f"{timeout:g} seconds."
+                )
         except Exception:
             pass
         try:
             os.startfile(exe)
-            return f"Opening {display}."
+            if self._wait_for_window(display, timeout):
+                return f"Opened {display} and confirmed its window is ready."
+            return (
+                f"Started {display}, but no matching window appeared within "
+                f"{timeout:g} seconds."
+            )
         except Exception:
             return f"I could not find {display} in the Windows Start Apps catalog."
+
+    @staticmethod
+    def _browser_executable(browser):
+        requested = browser.strip().casefold()
+        aliases = {
+            "chrome": "chrome.exe",
+            "google chrome": "chrome.exe",
+            "brave": "brave.exe",
+            "brave browser": "brave.exe",
+            "edge": "msedge.exe",
+            "microsoft edge": "msedge.exe",
+        }
+        executable = aliases.get(requested)
+        if executable is None:
+            return None
+        discovered = shutil.which(executable)
+        if discovered:
+            return discovered
+        local = os.getenv("LOCALAPPDATA", "")
+        program_files = os.getenv("PROGRAMFILES", "")
+        program_files_x86 = os.getenv("PROGRAMFILES(X86)", "")
+        candidates = {
+            "chrome.exe": (
+                Path(program_files) / "Google/Chrome/Application/chrome.exe",
+                Path(program_files_x86) / "Google/Chrome/Application/chrome.exe",
+                Path(local) / "Google/Chrome/Application/chrome.exe",
+            ),
+            "brave.exe": (
+                Path(program_files)
+                / "BraveSoftware/Brave-Browser/Application/brave.exe",
+                Path(program_files_x86)
+                / "BraveSoftware/Brave-Browser/Application/brave.exe",
+                Path(local)
+                / "BraveSoftware/Brave-Browser/Application/brave.exe",
+            ),
+            "msedge.exe": (
+                Path(program_files_x86)
+                / "Microsoft/Edge/Application/msedge.exe",
+                Path(program_files) / "Microsoft/Edge/Application/msedge.exe",
+            ),
+        }
+        return next(
+            (
+                str(candidate)
+                for candidate in candidates[executable]
+                if candidate.is_file()
+            ),
+            None,
+        )
+
+    def search_youtube(self, query, browser=""):
+        self._require_windows()
+        terms = query.strip()
+        if not terms:
+            raise ValueError("A YouTube search query is required")
+        url = (
+            "https://www.youtube.com/results?search_query="
+            f"{quote_plus(terms)}"
+        )
+        requested_browser = browser.strip()
+        if requested_browser:
+            executable = self._browser_executable(requested_browser)
+            if executable is None:
+                return f"I could not find {requested_browser} on this PC."
+            subprocess.Popen([executable, url])
+        else:
+            os.startfile(url)
+        timeout = float(os.getenv("JARVIS_BROWSER_LOAD_SECONDS", "20"))
+        if self._wait_for_window("youtube", timeout):
+            destination = requested_browser or "the default browser"
+            return (
+                f'Searched YouTube for "{terms}" in {destination} and '
+                "confirmed the page loaded."
+            )
+        return (
+            f'Opened the YouTube search for "{terms}", but the page did not '
+            f"visibly finish loading within {timeout:g} seconds."
+        )
 
     def terminal(self, command):
         normalized = command.strip()
@@ -182,6 +314,23 @@ class WindowsComputer:
                 + (f"\n{output}" if output else "")
             )
         return output
+
+    def system_status(self):
+        memory = psutil.virtual_memory()
+        drive = Path.home().anchor or str(Path.home())
+        disk = psutil.disk_usage(drive)
+        battery = psutil.sensors_battery()
+        if battery is None:
+            battery_status = "Battery information is unavailable"
+        else:
+            power = "plugged in" if battery.power_plugged else "on battery"
+            battery_status = f"Battery {battery.percent:.0f}% ({power})"
+        active = self.active_window_title() or "unavailable"
+        return (
+            f"{battery_status}; CPU {psutil.cpu_percent(interval=0.1):.0f}%; "
+            f"memory {memory.percent:.0f}%; disk {disk.percent:.0f}% used; "
+            f"active window: {active}."
+        )
 
     def type_text(self, text):
         self._require_input()
@@ -218,7 +367,7 @@ class WindowsComputer:
         if not 0 <= x < width or not 0 <= y < height:
             raise ValueError(f"Coordinates must fit the {width}x{height} screen")
         pyautogui.click(x=x, y=y, button=normalized)
-        return f"Clicked {normalized} at {x}, {y}."
+        return f"Sent a {normalized} click at {x}, {y}."
 
     def scroll_mouse(self, amount):
         self._require_input()
@@ -260,10 +409,10 @@ class WindowsComputer:
         return value, False
 
     def _launch_whatsapp(self):
-        if "whatsapp" in self.active_window_title().lower():
-            return True
         timeout = float(os.getenv("JARVIS_WHATSAPP_LOAD_SECONDS", "10"))
-        if self._start_search_and_open("WhatsApp", timeout):
+        if "whatsapp" not in self.active_window_title().casefold():
+            self._start_search_and_open("WhatsApp", timeout)
+        if self._wait_for_whatsapp_ready(timeout):
             return True
         app_id = self._start_menu_app_id("WhatsApp")
         if app_id:
@@ -271,13 +420,15 @@ class WindowsComputer:
                 ["explorer.exe", f"shell:AppsFolder\\{app_id}"],
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
-            return self._wait_for_window("whatsapp", timeout)
+            return self._wait_for_whatsapp_ready(timeout) is not None
         return False
 
     def _whatsapp_window(self):
         if win32gui is None:
             return None
-        handle = win32gui.GetForegroundWindow()
+        handle = self._matching_window_handle("whatsapp")
+        if handle is None:
+            return None
         if Desktop is not None:
             try:
                 return Desktop(backend="uia").window(handle=handle)
@@ -291,6 +442,26 @@ class WindowsComputer:
             )
         except Exception:
             return None
+
+    def _whatsapp_ready(self, require_chat=False):
+        window = self._whatsapp_window()
+        if window is None:
+            return None
+        if self._whatsapp_message_box(window) is not None:
+            return window
+        if require_chat:
+            return None
+        for control in self._window_controls(window, ("Edit", "Document")):
+            label = self._control_label(control).casefold()
+            if "search" in label or "new chat" in label:
+                return window
+        return None
+
+    def _wait_for_whatsapp_ready(self, timeout, require_chat=False):
+        return self._wait_until(
+            lambda: self._whatsapp_ready(require_chat),
+            timeout,
+        )
 
     @staticmethod
     def _control_label(control):
@@ -407,45 +578,61 @@ class WindowsComputer:
         return matches
 
     def _search_whatsapp_contact(self, contact):
-        window = self._whatsapp_window()
-        if window is not None:
-            edits = self._window_controls(window, ("Edit",))
-            search = next(
-                (
-                    edit
-                    for edit in edits
-                    if "search" in self._control_label(edit).lower()
-                ),
-                None,
-            )
-            if search is not None:
-                self._click_control(search)
-                pyautogui.hotkey("ctrl", "a")
-                self._paste_text(contact)
-                time.sleep(0.8)
-                target = contact.casefold()
+        timeout = float(os.getenv("JARVIS_WHATSAPP_CONTROL_SECONDS", "12"))
+
+        def find_search():
+            window = self._whatsapp_window()
+            for control in self._window_controls(
+                window,
+                ("Edit", "Document"),
+            ):
+                label = self._control_label(control).casefold()
+                if "search" in label or "new chat" in label:
+                    return control
+            return None
+
+        search = self._wait_until(find_search, timeout)
+        if search is not None and self._click_control(search):
+            pyautogui.hotkey("ctrl", "a")
+            self._paste_text(contact)
+            target = contact.casefold()
+
+            def select_match():
+                window = self._whatsapp_window()
                 for control in self._window_controls(
                     window,
                     ("ListItem", "Button", "Text"),
                 ):
                     normalized = self._control_text(control).casefold()
-                    if (
-                        normalized == target
-                        or normalized.startswith(f"{target}\n")
-                    ) and self._click_control(control):
-                        time.sleep(0.75)
-                        return True
+                    if normalized == target or normalized.startswith(
+                        f"{target}\n"
+                    ):
+                        return self._click_control(control)
+                return False
+
+            if self._wait_until(select_match, timeout):
+                return (
+                    self._wait_for_whatsapp_ready(
+                        timeout,
+                        require_chat=True,
+                    )
+                    is not None
+                )
 
         pyautogui.hotkey("ctrl", "n")
-        time.sleep(0.35)
+        fallback_search = self._wait_until(find_search, min(timeout, 3))
+        if fallback_search is not None:
+            self._click_control(fallback_search)
         self._paste_text(contact)
-        time.sleep(0.8)
+        time.sleep(0.5)
         pyautogui.press("down")
         pyautogui.press("enter")
-        time.sleep(0.75)
-        refreshed_window = self._whatsapp_window()
-        return refreshed_window is None or self._focus_whatsapp_composer(
-            refreshed_window
+        return (
+            self._wait_for_whatsapp_ready(
+                timeout,
+                require_chat=True,
+            )
+            is not None
         )
 
     def _open_whatsapp_conversation(self, recipient, message=""):
@@ -468,7 +655,10 @@ class WindowsComputer:
         except OSError:
             webbrowser.open(web_url)
         timeout = float(os.getenv("JARVIS_WHATSAPP_LOAD_SECONDS", "10"))
-        ready = self._wait_for_window("whatsapp", timeout)
+        ready = (
+            self._wait_for_whatsapp_ready(timeout, require_chat=True)
+            is not None
+        )
         return normalized, ready, bool(message)
 
     def _paste_text(self, text):
@@ -536,14 +726,29 @@ class WindowsComputer:
         )
 
     def _whatsapp_call_started(self):
-        title = self.active_window_title().casefold()
-        if "whatsapp" in title and "call" in title:
-            return True
+        if win32gui is not None:
+            matches = []
+
+            def collect(handle, results):
+                title = win32gui.GetWindowText(handle).casefold()
+                if (
+                    win32gui.IsWindowVisible(handle)
+                    and "whatsapp" in title
+                    and "call" in title
+                ):
+                    results.append(handle)
+
+            win32gui.EnumWindows(collect, matches)
+            if matches:
+                return True
         window = self._whatsapp_window()
         return self._find_whatsapp_action(
             window,
             ("end call", "hang up", "leave call"),
         ) is not None
+
+    def wait_for_whatsapp_call(self, timeout=5):
+        return self._wait_until(self._whatsapp_call_started, timeout) is not None
 
     def start_whatsapp_call(self, recipient, video=False):
         self._require_input()
@@ -554,7 +759,6 @@ class WindowsComputer:
                 f"Opened WhatsApp for {target}, but could not start the "
                 f"{call_type} call because a matching chat was not ready."
             )
-        window = self._whatsapp_window()
         terms = (
             ("video call", "start video", "video")
             if video
@@ -565,18 +769,28 @@ class WindowsComputer:
             if video
             else ("video", "group", "end call", "hang up")
         )
-        call_button = self._find_whatsapp_action(window, terms, excluded)
-        triggered = (
-            call_button is not None and self._click_control(call_button)
+        control_timeout = float(
+            os.getenv("JARVIS_WHATSAPP_CONTROL_SECONDS", "12")
+        )
+
+        def click_call_control():
+            window = self._whatsapp_window()
+            call_button = self._find_whatsapp_action(
+                window,
+                terms,
+                excluded,
+            )
+            if call_button is None:
+                return False
+            return self._click_control(call_button)
+
+        triggered = self._wait_until(
+            click_call_control,
+            control_timeout,
         )
         if triggered:
-            deadline = time.monotonic() + 4
-            while time.monotonic() < deadline:
-                if self._whatsapp_call_started():
-                    return (
-                        f"Started a WhatsApp {call_type} call with {target}."
-                    )
-                time.sleep(0.25)
+            if self.wait_for_whatsapp_call(6):
+                return f"Started a WhatsApp {call_type} call with {target}."
         return (
             f"Opened the WhatsApp chat for {target}, but could not find or "
             f"confirm its {call_type} call control."
