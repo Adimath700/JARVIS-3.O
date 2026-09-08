@@ -35,7 +35,7 @@
         <div class="bar"><i style="--value: 84%"></i></div>
         <div class="metric">
           <span>SECURITY GATE</span>
-          <b>ACTIVE</b>
+          <b id="security-status">OWNER</b>
         </div>
         <div class="bar"><i style="--value: 100%"></i></div>
         <div class="metric">
@@ -43,8 +43,8 @@
           <b>LOCAL</b>
         </div>
         <div class="bar"><i style="--value: 72%"></i></div>
-        <p class="microcopy">
-          High-risk actions always wait for your approval.
+        <p class="microcopy" id="security-message">
+          Owner mode executes requested actions without confirmation.
         </p>
       </aside>
 
@@ -86,7 +86,7 @@
             <li><span></span> Open applications</li>
             <li><span></span> Understand screen</li>
             <li><span></span> Type and press keys</li>
-            <li><span></span> Run approved commands</li>
+            <li><span></span> Run requested commands</li>
             <li><span></span> Manage files and windows</li>
             <li><span></span> Build PowerPoint decks</li>
             <li><span></span> WhatsApp messages and calls</li>

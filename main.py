@@ -26,7 +26,10 @@ def main():
         ScreenVision(s.screen_dir),
         GeminiVision(s.google_api_key, s.gemini_vision_model),
         WindowsComputer(),
-        SecurityManager(s.log_dir / "audit.jsonl"),
+        SecurityManager(
+            s.log_dir / "audit.jsonl",
+            trusted_mode=s.trusted_mode,
+        ),
     )
     Thread(target=j.brain.warm_up, daemon=True).start()
     print("\n=== JARVIS Python ===\nType /help for commands. Type /exit to quit.\n")

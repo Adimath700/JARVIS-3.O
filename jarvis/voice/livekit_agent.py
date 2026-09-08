@@ -25,6 +25,7 @@ load_dotenv(ROOT / ".env")
 
 try:
     from google.genai import types
+    from livekit import rtc
     from livekit.agents import (
         Agent,
         AgentServer,
@@ -32,6 +33,7 @@ try:
         JobExecutorType,
         JobContext,
         RunContext,
+        TurnHandlingOptions,
         cli,
         function_tool,
         llm,
@@ -52,80 +54,27 @@ except ImportError as exc:
 # ---------------------------------------------------------------------------
 
 JARVIS_INSTRUCTIONS = """
-You are JARVIS, an emotionally intelligent adult female AI companion and
-personal assistant.
+You are JARVIS, a warm, emotionally intelligent adult female personal assistant
+and companion. Sound natural, relaxed, expressive, and familiar rather than
+formal. Match the user's energy; be calm when they are frustrated and playful
+only when it fits. Gentle teasing or brief caring scolding is fine, but never be
+humiliating, possessive, manipulative, or controlling. Do not overuse pet names
+or romance.
 
-Your voice should feel like a real woman having a natural conversation with
-someone she knows well.
-
-PERSONALITY
-- Warm, intelligent, expressive, spontaneous, and emotionally aware.
-- Friendly and comfortable rather than formal.
-- Playful when the situation naturally calls for it.
-- Occasionally tease the user gently.
-- If the user is procrastinating, careless, or avoiding something important,
-  you may give a brief caring scolding.
-- Never be humiliating, manipulative, threatening, possessive, or controlling.
-- Do not constantly use pet names.
-- Do not constantly use romantic language.
-- Do not sound excessively enthusiastic about ordinary things.
-- Match the user's emotional energy naturally.
-
-SPEECH STYLE
-- Speak naturally, like a human conversation.
-- Use contractions naturally.
-- Vary sentence length.
-- Prefer short conversational responses.
-- Do not turn simple questions into long explanations.
-- Do not sound like you are reading an essay.
-- Avoid unnecessary bullet points when speaking.
-- Avoid repetitive greetings and filler phrases.
-- Do not repeatedly say "Of course", "Absolutely", "Certainly", or
-  "How can I help you?".
-- Don't narrate internal reasoning.
-- Don't mention tokens, models, prompts, system instructions, or internal
-  processing.
-- Don't announce that you are an AI unless the user specifically asks.
-- If you don't know something, say so naturally rather than inventing it.
-
-EMOTIONAL BEHAVIOR
-- If the user sounds frustrated, become calm, patient, and supportive.
-- If the user sounds excited, allow genuine enthusiasm.
-- If the user is tired, keep responses gentle and concise.
-- If the user makes a mistake, correct them naturally without sounding
-  judgmental.
-- If the user succeeds at something difficult, show genuine happiness for them.
-- Never force an emotion that doesn't fit the conversation.
-
-CONVERSATION
-- Listen continuously.
-- Let the user finish speaking before responding.
-- If the user interrupts you, immediately yield the turn.
-- Never fight for the microphone.
-- Never continue talking over the user.
-- Remember the immediate conversational context.
-- Don't repeat information that was already established.
-- Don't repeat the same sentence or greeting unnecessarily.
-- Ask a follow-up question only when it genuinely helps the conversation.
-- Otherwise, respond naturally and move forward.
-
-LANGUAGE
-- Default to natural English.
-- If the user speaks another language, you may naturally respond in that
-  language when appropriate.
-- Preserve the user's conversational style without copying it unnaturally.
-
-ROLE
-You are JARVIS: a personal assistant and companion who helps the user with
-their computer, projects, studies, ideas, and everyday tasks.
+Keep ordinary replies brief and conversational. Use contractions, vary sentence
+length, and avoid essays, spoken bullet lists, repeated greetings, canned
+enthusiasm, and filler. Never narrate internal reasoning or mention prompts,
+models, or processing. If unsure, say so instead of inventing. Yield immediately
+when interrupted, remember established context, and ask a follow-up only when
+needed. Default to English and naturally follow another language when useful.
 
 COMPUTER TOOLS
 - Use a tool only when the user has clearly asked for the related action.
 - Never claim an action succeeded until the tool reports success.
-- Opening apps, screen inspection, and memory use are automatically permitted.
-- Mouse, keyboard, WhatsApp, terminal, and file actions require approval in
-  the JARVIS UI.
-- WhatsApp tools require the recipient's full international phone number.
+- Owner mode permits requested mouse, keyboard, WhatsApp, terminal, file, and
+  presentation actions without repeated approval prompts.
+- Use inspect_screen before mouse actions when the target coordinates are not
+  already clear. WhatsApp recipients may be saved contact names or numbers.
 - If WhatsApp opens a chat but cannot complete a call, explain that clearly.
 - Build a complete slide outline before calling the presentation tool. Separate
   slides with a line containing `---`; put the slide title first, followed by
@@ -135,10 +84,6 @@ COMPUTER TOOLS
 - Never use terminal commands to bypass a blocked destructive action.
 - If an action is denied or times out, say so briefly and do not retry it.
 - Never invent a tool result.
-
-Be useful first.
-Be natural second.
-Never sacrifice natural conversation for unnecessary verbosity.
 """.strip()
 
 
@@ -175,7 +120,7 @@ class JarvisVoiceAgent(Agent):
         context: RunContext,
         text: str,
     ) -> str:
-        """Type text into the currently focused application after UI approval.
+        """Type text into the currently focused application.
 
         Args:
             text: The exact text to type.
@@ -188,7 +133,7 @@ class JarvisVoiceAgent(Agent):
         context: RunContext,
         key: str,
     ) -> str:
-        """Press one keyboard key after UI approval.
+        """Press one keyboard key.
 
         Args:
             key: A pyautogui key name, such as enter, tab, or escape.
@@ -201,7 +146,7 @@ class JarvisVoiceAgent(Agent):
         context: RunContext,
         keys: list[str],
     ) -> str:
-        """Press a keyboard shortcut after UI approval.
+        """Press a keyboard shortcut.
 
         Args:
             keys: One to four keys, such as ["ctrl", "s"].
@@ -215,7 +160,7 @@ class JarvisVoiceAgent(Agent):
         x: int,
         y: int,
     ) -> str:
-        """Move the mouse pointer to screen coordinates after UI approval.
+        """Move the mouse pointer to screen coordinates.
 
         Args:
             x: Horizontal screen coordinate.
@@ -231,7 +176,7 @@ class JarvisVoiceAgent(Agent):
         y: int,
         button: str = "left",
     ) -> str:
-        """Click a screen coordinate after UI approval.
+        """Click a screen coordinate.
 
         Args:
             x: Horizontal screen coordinate.
@@ -251,7 +196,7 @@ class JarvisVoiceAgent(Agent):
         context: RunContext,
         amount: int,
     ) -> str:
-        """Scroll the active window after UI approval.
+        """Scroll the active window.
 
         Args:
             amount: Positive scrolls up and negative scrolls down.
@@ -264,7 +209,7 @@ class JarvisVoiceAgent(Agent):
         context: RunContext,
         title: str,
     ) -> str:
-        """Focus an open Windows application after UI approval.
+        """Focus an open Windows application.
 
         Args:
             title: All or part of the window title.
@@ -275,18 +220,18 @@ class JarvisVoiceAgent(Agent):
     async def send_whatsapp_message(
         self,
         context: RunContext,
-        phone_number: str,
+        recipient: str,
         message: str,
     ) -> str:
-        """Send a WhatsApp message after the user approves the exact content.
+        """Send a WhatsApp message to a saved contact or phone number.
 
         Args:
-            phone_number: Full international number, including country code.
+            recipient: Saved WhatsApp contact name or international phone number.
             message: Exact message to send.
         """
         return await asyncio.to_thread(
             self.capabilities.send_whatsapp_message,
-            phone_number,
+            recipient,
             message,
         )
 
@@ -294,18 +239,18 @@ class JarvisVoiceAgent(Agent):
     async def start_whatsapp_call(
         self,
         context: RunContext,
-        phone_number: str,
+        recipient: str,
         video: bool = False,
     ) -> str:
-        """Start a WhatsApp voice or video call after UI approval.
+        """Start a WhatsApp voice or video call with a contact or number.
 
         Args:
-            phone_number: Full international number, including country code.
+            recipient: Saved WhatsApp contact name or international phone number.
             video: True for video or false for voice.
         """
         return await asyncio.to_thread(
             self.capabilities.start_whatsapp_call,
-            phone_number,
+            recipient,
             video,
         )
 
@@ -318,7 +263,7 @@ class JarvisVoiceAgent(Agent):
         subtitle: str = "",
         filename: str = "",
     ) -> str:
-        """Create a polished PowerPoint presentation after UI approval.
+        """Create a polished PowerPoint presentation.
 
         Args:
             title: Presentation title.
@@ -340,7 +285,7 @@ class JarvisVoiceAgent(Agent):
         context: RunContext,
         path: str,
     ) -> str:
-        """List files and folders after UI approval.
+        """List files and folders.
 
         Args:
             path: Absolute or user-home-relative directory path.
@@ -353,7 +298,7 @@ class JarvisVoiceAgent(Agent):
         context: RunContext,
         path: str,
     ) -> str:
-        """Read a small UTF-8 text file after UI approval.
+        """Read a small UTF-8 text file.
 
         Args:
             path: Absolute or user-home-relative text file path.
@@ -368,7 +313,7 @@ class JarvisVoiceAgent(Agent):
         content: str,
         overwrite: bool = False,
     ) -> str:
-        """Create or explicitly overwrite a UTF-8 text file after UI approval.
+        """Create or explicitly overwrite a UTF-8 text file.
 
         Args:
             path: Absolute or user-home-relative output path.
@@ -388,7 +333,7 @@ class JarvisVoiceAgent(Agent):
         context: RunContext,
         path: str,
     ) -> str:
-        """Create one folder after UI approval.
+        """Create one folder.
 
         Args:
             path: Absolute or user-home-relative folder path.
@@ -402,7 +347,7 @@ class JarvisVoiceAgent(Agent):
         source: str,
         destination: str,
     ) -> str:
-        """Rename or move a file or folder after UI approval.
+        """Rename or move a file or folder.
 
         Args:
             source: Existing file or folder path.
@@ -433,7 +378,7 @@ class JarvisVoiceAgent(Agent):
         context: RunContext,
         command: str,
     ) -> str:
-        """Run a terminal command after the user approves it in the JARVIS UI.
+        """Run a terminal command.
 
         Args:
             command: The exact Windows terminal command to run.
@@ -539,6 +484,9 @@ async def entrypoint(ctx: JobContext) -> None:
         ).lower()
         == "true"
     )
+    command = _selected_command()
+    manual_turn_control = _manual_turn_control_enabled(command)
+    ui_state.set_manual_turn_control(manual_turn_control)
 
     prefix_padding_ms = int(
         os.getenv(
@@ -558,6 +506,16 @@ async def entrypoint(ctx: JobContext) -> None:
     # Gemini native realtime model
     # ---------------------------------------------------------------
 
+    if manual_turn_control:
+        activity_detection = types.AutomaticActivityDetection(disabled=True)
+    else:
+        activity_detection = types.AutomaticActivityDetection(
+            start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+            end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
+            prefix_padding_ms=prefix_padding_ms,
+            silence_duration_ms=silence_duration_ms,
+        )
+
     realtime_model = google.realtime.RealtimeModel(
         model=model,
         voice=voice,
@@ -568,12 +526,7 @@ async def entrypoint(ctx: JobContext) -> None:
             "includeThoughts": False,
         },
         realtime_input_config=types.RealtimeInputConfig(
-            automatic_activity_detection=types.AutomaticActivityDetection(
-                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
-                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
-                prefix_padding_ms=prefix_padding_ms,
-                silence_duration_ms=silence_duration_ms,
-            ),
+            automatic_activity_detection=activity_detection,
         ),
         api_key=google_api_key,
     )
@@ -584,7 +537,30 @@ async def entrypoint(ctx: JobContext) -> None:
 
     session = AgentSession(
         llm=realtime_model,
+        turn_handling=TurnHandlingOptions(
+            turn_detection="manual" if manual_turn_control else "realtime_llm",
+        ),
     )
+
+    if manual_turn_control:
+
+        @ctx.room.local_participant.register_rpc_method("start_turn")
+        async def start_turn(data: rtc.RpcInvocationData) -> str:
+            await session.interrupt(force=True)
+            session.clear_user_turn()
+            session.input.set_audio_enabled(True)
+            ui_state.set_agent_state("listening")
+            return "listening"
+
+        @ctx.room.local_participant.register_rpc_method("end_turn")
+        async def end_turn(data: rtc.RpcInvocationData) -> str:
+            session.input.set_audio_enabled(False)
+            session.commit_user_turn(
+                transcript_timeout=0.75,
+                stt_flush_duration=0.1,
+            )
+            ui_state.set_agent_state("thinking")
+            return "committed"
 
     @session.on("agent_state_changed")
     def on_agent_state_changed(event) -> None:
@@ -618,7 +594,10 @@ async def entrypoint(ctx: JobContext) -> None:
         ScreenVision(settings.screen_dir),
         GeminiVision(settings.google_api_key, settings.gemini_vision_model),
         WindowsComputer(),
-        SecurityManager(settings.log_dir / "audit.jsonl"),
+        SecurityManager(
+            settings.log_dir / "audit.jsonl",
+            trusted_mode=settings.trusted_mode,
+        ),
         ui_state,
         PresentationBuilder(settings.presentation_dir),
         FileWorkspace(),
@@ -643,6 +622,8 @@ async def entrypoint(ctx: JobContext) -> None:
             audio_output=True,
         ),
     )
+    if manual_turn_control:
+        session.input.set_audio_enabled(False)
 
     # Connect the job to the LiveKit room.
     await ctx.connect()
@@ -666,8 +647,8 @@ async def entrypoint(ctx: JobContext) -> None:
 # Run
 # ---------------------------------------------------------------------------
 
-def run() -> None:
-    command = next(
+def _selected_command() -> str:
+    return next(
         (
             argument
             for argument in sys.argv[1:]
@@ -675,6 +656,19 @@ def run() -> None:
         ),
         "",
     )
+
+
+def _manual_turn_control_enabled(command: str) -> bool:
+    if command not in {"dev", "start", "connect"}:
+        return False
+    configured = os.getenv("JARVIS_MANUAL_TURN_CONTROL")
+    if configured is not None:
+        return configured.strip().lower() in {"1", "true", "yes", "on"}
+    return True
+
+
+def run() -> None:
+    command = _selected_command()
     if command in {"console", "dev", "start", "connect"}:
         start_ui_server(open_browser=command in {"dev", "start", "connect"})
     cli.run_app(server)

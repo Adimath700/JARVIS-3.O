@@ -13,6 +13,11 @@ except ImportError:
     pyautogui = None
 
 try:
+    import pyperclip
+except ImportError:
+    pyperclip = None
+
+try:
     import win32gui
 except ImportError:
     win32gui = None
@@ -89,6 +94,15 @@ class WindowsComputer:
         except Exception:
             return None
 
+    def _start_search_and_open(self, application: str, timeout: float = 8.0) -> bool:
+        self._require_input()
+        pyautogui.press("win")
+        time.sleep(0.3)
+        pyautogui.write(application, interval=0.03)
+        time.sleep(0.4)
+        pyautogui.press("enter")
+        return self._wait_for_window(application, timeout)
+
     def open_app(self, name):
         name = name.strip()
         aliases = {
@@ -104,6 +118,8 @@ class WindowsComputer:
             "file explorer": "File Explorer",
         }
         display = aliases.get(name.lower(), name)
+        if name.lower() == "whatsapp" and self._start_search_and_open(display):
+            return f"Opening {display}."
         app_id = self._start_menu_app_id(display)
         if app_id:
             subprocess.Popen(
@@ -225,16 +241,120 @@ class WindowsComputer:
         win32gui.SetForegroundWindow(handle)
         return f"Focused {matched_title}."
 
-    def _open_whatsapp_chat(self, phone_number, message=""):
-        self._require_windows()
-        phone = re.sub(r"\D", "", phone_number)
-        if not 7 <= len(phone) <= 15:
-            raise ValueError(
-                "Use a full international phone number with 7 to 15 digits"
+    @staticmethod
+    def _normalize_whatsapp_recipient(recipient):
+        value = recipient.strip()
+        if not value:
+            raise ValueError("A WhatsApp contact name or phone number is required")
+        if re.fullmatch(r"[\d+\s().-]+", value):
+            phone = re.sub(r"\D", "", value)
+            if not 7 <= len(phone) <= 15:
+                raise ValueError(
+                    "A WhatsApp phone number must contain 7 to 15 digits"
+                )
+            return phone, True
+        return value, False
+
+    def _launch_whatsapp(self):
+        if "whatsapp" in self.active_window_title().lower():
+            return True
+        timeout = float(os.getenv("JARVIS_WHATSAPP_LOAD_SECONDS", "10"))
+        if self._start_search_and_open("WhatsApp", timeout):
+            return True
+        app_id = self._start_menu_app_id("WhatsApp")
+        if app_id:
+            subprocess.Popen(
+                ["explorer.exe", f"shell:AppsFolder\\{app_id}"],
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
+            return self._wait_for_window("whatsapp", timeout)
+        return False
+
+    def _whatsapp_window(self):
+        if Application is None or win32gui is None:
+            return None
+        handle = win32gui.GetForegroundWindow()
+        try:
+            return Application(backend="uia").connect(handle=handle).window(
+                handle=handle
+            )
+        except Exception:
+            return None
+
+    @staticmethod
+    def _control_label(control):
+        try:
+            return control.window_text().strip()
+        except Exception:
+            return ""
+
+    def _whatsapp_message_box(self, window):
+        if window is None:
+            return None
+        return next(
+            (
+                edit
+                for edit in window.descendants(control_type="Edit")
+                if "message" in self._control_label(edit).lower()
+                and "search" not in self._control_label(edit).lower()
+            ),
+            None,
+        )
+
+    def _search_whatsapp_contact(self, contact):
+        window = self._whatsapp_window()
+        if window is not None:
+            edits = window.descendants(control_type="Edit")
+            search = next(
+                (
+                    edit
+                    for edit in edits
+                    if "search" in self._control_label(edit).lower()
+                ),
+                None,
+            )
+            if search is not None:
+                search.click_input()
+                search.set_edit_text(contact)
+                time.sleep(0.8)
+                target = contact.casefold()
+                for control_type in ("ListItem", "Button", "Text"):
+                    for control in window.descendants(control_type=control_type):
+                        label = self._control_label(control)
+                        normalized = label.casefold()
+                        if normalized == target or normalized.startswith(
+                            f"{target}\n"
+                        ):
+                            control.click_input()
+                            time.sleep(0.5)
+                            return True
+
+        pyautogui.hotkey("ctrl", "f")
+        time.sleep(0.2)
+        pyautogui.hotkey("ctrl", "a")
+        self._paste_text(contact)
+        time.sleep(0.8)
+        pyautogui.press("down")
+        pyautogui.press("enter")
+        time.sleep(0.5)
+        refreshed_window = self._whatsapp_window()
+        return (
+            refreshed_window is None
+            or self._whatsapp_message_box(refreshed_window) is not None
+        )
+
+    def _open_whatsapp_conversation(self, recipient, message=""):
+        self._require_windows()
+        normalized, is_phone = self._normalize_whatsapp_recipient(recipient)
+        if not is_phone:
+            ready = self._launch_whatsapp()
+            if ready:
+                ready = self._search_whatsapp_contact(normalized)
+            return normalized, ready, False
+
         encoded = quote(message)
-        desktop_url = f"whatsapp://send?phone={phone}"
-        web_url = f"https://web.whatsapp.com/send?phone={phone}"
+        desktop_url = f"whatsapp://send?phone={normalized}"
+        web_url = f"https://web.whatsapp.com/send?phone={normalized}"
         if message:
             desktop_url += f"&text={encoded}"
             web_url += f"&text={encoded}"
@@ -244,53 +364,68 @@ class WindowsComputer:
             webbrowser.open(web_url)
         timeout = float(os.getenv("JARVIS_WHATSAPP_LOAD_SECONDS", "10"))
         ready = self._wait_for_window("whatsapp", timeout)
-        return phone, ready
+        return normalized, ready, bool(message)
 
-    def send_whatsapp_message(self, phone_number, message):
+    def _paste_text(self, text):
+        if pyperclip is None:
+            pyautogui.write(text, interval=0.01)
+            return
+        try:
+            previous = pyperclip.paste()
+        except Exception:
+            previous = None
+        try:
+            pyperclip.copy(text)
+            pyautogui.hotkey("ctrl", "v")
+        finally:
+            if previous is not None:
+                time.sleep(0.1)
+                pyperclip.copy(previous)
+
+    def send_whatsapp_message(self, recipient, message):
         self._require_input()
         if not message.strip():
             raise ValueError("WhatsApp message cannot be empty")
-        phone, ready = self._open_whatsapp_chat(phone_number, message)
+        target, ready, message_prefilled = self._open_whatsapp_conversation(
+            recipient,
+            message,
+        )
         if not ready:
             return (
-                f"Opened the WhatsApp chat for {phone}, but did not send because "
-                "the WhatsApp window was not ready."
+                f"Opened WhatsApp for {target}, but did not send because a "
+                "matching chat was not ready."
             )
         time.sleep(0.75)
+        if not message_prefilled:
+            message_box = self._whatsapp_message_box(self._whatsapp_window())
+            if message_box is not None:
+                message_box.click_input()
+            self._paste_text(message)
         pyautogui.press("enter")
-        return f"Submitted the WhatsApp message to {phone}."
+        return f"Submitted the WhatsApp message to {target}."
 
-    def start_whatsapp_call(self, phone_number, video=False):
+    def start_whatsapp_call(self, recipient, video=False):
         self._require_input()
-        phone, ready = self._open_whatsapp_chat(phone_number)
+        target, ready, _ = self._open_whatsapp_conversation(recipient)
         call_type = "video" if video else "voice"
         if not ready:
             return (
-                f"Opened the WhatsApp chat for {phone}, but could not start the "
-                f"{call_type} call because the WhatsApp window was not ready."
+                f"Opened WhatsApp for {target}, but could not start the "
+                f"{call_type} call because a matching chat was not ready."
             )
-        if Application is None or win32gui is None:
+        window = self._whatsapp_window()
+        if window is None:
             return (
-                f"Opened the WhatsApp chat for {phone}, but automatic calling "
+                f"Opened the WhatsApp chat for {target}, but automatic calling "
                 "requires pywinauto and pywin32."
-            )
-        handle = win32gui.GetForegroundWindow()
-        try:
-            window = Application(backend="uia").connect(handle=handle).window(
-                handle=handle
-            )
-        except Exception:
-            return (
-                f"Opened the WhatsApp chat for {phone}, but could not inspect "
-                f"the window to start the {call_type} call."
             )
         expected = f"{call_type} call"
         for button in window.descendants(control_type="Button"):
-            label = button.window_text().strip().lower()
+            label = self._control_label(button).lower()
             if expected in label:
                 button.click_input()
-                return f"Started a WhatsApp {call_type} call with {phone}."
+                return f"Started a WhatsApp {call_type} call with {target}."
         return (
-            f"Opened the WhatsApp chat for {phone}, but could not find the "
+            f"Opened the WhatsApp chat for {target}, but could not find the "
             f"{call_type} call button. Start it manually from the open chat."
         )

@@ -26,6 +26,7 @@ class Settings:
     whisper_compute_type: str = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
     piper_exe: str = os.getenv("PIPER_EXE", "")
     piper_voice: str = os.getenv("PIPER_VOICE", "en_US-lessac-medium")
+    trusted_mode: bool = env_bool("JARVIS_TRUSTED_MODE", True)
     screen_dir: Path = ROOT / os.getenv("JARVIS_SCREEN_DIR", "data/screenshots")
     log_dir: Path = ROOT / os.getenv("JARVIS_LOG_DIR", "data/logs")
     presentation_dir: Path = ROOT / os.getenv(

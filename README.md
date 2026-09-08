@@ -9,9 +9,9 @@ A Windows-first, Python-native foundation for a personal AI desktop assistant.
 - Local Whisper STT (`faster-whisper`)
 - Local Piper TTS support (optional)
 - Windows app launching, mouse, keyboard, files, terminal tools
-- WhatsApp message and call automation with explicit confirmation
+- WhatsApp message and call automation
 - PowerPoint presentation generation with a polished dark theme
-- Security/risk gates and audit log
+- Trusted owner mode, destructive-action safeguards, and audit log
 - Persistent JSON memory
 - CLI assistant loop
 - LiveKit/Gemini native audio with secured computer-control tools
@@ -49,8 +49,8 @@ Natural language examples:
 - `what time is it?`
 - `remember that my project is JARVIS`
 - `what do you remember about my project?`
-- `type hello` (approval required)
-- `run terminal dir` (approval required)
+- `type hello`
+- `run terminal dir`
 - `exit`
 
 Direct CLI commands:
@@ -65,13 +65,13 @@ Direct CLI commands:
 
 ## Security
 The model never decides whether an action is safe. The security manager
-classifies actions and writes every decision to the local audit log. Opening
-apps, screen inspection, and memory are low risk. Mouse, keyboard, file,
-WhatsApp, presentation, and terminal actions pause the voice tool and show an
-**Allow once / Deny** confirmation in the JARVIS UI. Credential/key files are
-blocked, and destructive deletion, shutdown, and restart actions remain
-disabled. Common destructive terminal commands are also rejected rather than
-used to bypass those controls.
+classifies actions and writes every decision to the local audit log.
+`JARVIS_TRUSTED_MODE=true` enables owner mode, so requested mouse, keyboard,
+file, WhatsApp, presentation, and terminal actions run without repeated
+confirmation. Set it to `false` to restore **Allow once / Deny** prompts.
+Credential/key files are blocked, and destructive deletion, shutdown, and
+restart actions remain disabled. Common destructive terminal commands are also
+rejected rather than used to bypass those controls.
 
 ## Natural Voice + Holographic UI
 
@@ -79,7 +79,7 @@ JARVIS uses LiveKit Agents with Gemini native audio for the natural voice
 path. The current voice configuration keeps Gemini 2.5 native audio because
 it supports affective dialogue, while screen vision can use a separate Gemini
 model. The voice agent can open applications, understand the current screen,
-use local memory, and perform approval-gated keyboard or terminal actions.
+use local memory, and perform owner-authorized laptop actions.
 
 Required `.env` values:
 
@@ -93,8 +93,10 @@ Required `.env` values:
 - `LIVEKIT_GEMINI_AFFECTIVE_DIALOG=true`
 - `LIVEKIT_PREFIX_PADDING_MS=50`
 - `LIVEKIT_SILENCE_DURATION_MS=200`
+- `JARVIS_MANUAL_TURN_CONTROL=true`
 - `JARVIS_UI_PORT=8765`
 - `JARVIS_UI_AUTO_OPEN=true`
+- `JARVIS_TRUSTED_MODE=true`
 - `JARVIS_APPROVAL_TIMEOUT_SECONDS=45`
 
 The LiveKit silence duration controls how quickly JARVIS responds after you
@@ -133,6 +135,10 @@ then hold the central control (or hold Space) while speaking. The UI responds
 to listening, thinking, speaking, tool, approval, and error states. Agent audio
 drives the core animation in real time.
 
+With `JARVIS_MANUAL_TURN_CONTROL=true`, releasing the control immediately
+commits the recorded turn instead of waiting for Gemini's silence timer.
+Console mode always keeps automatic turn detection.
+
 The UI creates a unique LiveKit room for each connection and dispatches the
 configured `LIVEKIT_AGENT_NAME` into it. Keep the `dev` process running while
 using the interface.
@@ -142,21 +148,22 @@ Voice tool examples:
 - “Open Visual Studio Code.”
 - “What is visible on my screen?”
 - “Remember that my project uses Python 3.11.”
-- “Type this message into the active window.” (approval required)
-- “Press Enter.” (approval required)
-- “Run `dir` in the terminal.” (approval required)
-- “Send ‘I will arrive at six’ on WhatsApp to 15551234567.” (approval required)
-- “Start a WhatsApp voice call with 15551234567.” (approval required)
-- “Create a five-slide presentation about renewable energy.” (approval required)
-- “List the files in my Documents folder.” (approval required)
-- “Open my project presentation.” (approval required)
+- “Type this message into the active window.”
+- “Press Enter.”
+- “Run `dir` in the terminal.”
+- “Send ‘I will arrive at six’ on WhatsApp to Priya.”
+- “Start a WhatsApp video call with Mom.”
+- “Create a five-slide presentation about renewable energy.”
+- “List the files in my Documents folder.”
+- “Open my project presentation.”
 
 WhatsApp automation requires WhatsApp Desktop or WhatsApp Web to already be
-signed in. Use a complete international number with country code. JARVIS sends
-only after showing the exact recipient/message for approval. Calls are started
-through the accessible WhatsApp call button when available; if the installed
-WhatsApp version does not expose that control, JARVIS leaves the correct chat
-open for manual completion rather than clicking an unknown screen position.
+signed in. JARVIS accepts a saved contact name or a complete international
+number. For names, it opens WhatsApp through Windows Start search, searches the
+signed-in account's contacts, and selects the matching result without fixed
+screen coordinates. Calls use the accessible WhatsApp call button when
+available; if the installed WhatsApp version does not expose that control,
+JARVIS leaves the selected chat open for manual completion.
 
 Generated presentations are stored in `data/presentations` by default. Change
 `JARVIS_PRESENTATION_DIR` in `.env` to use another folder.

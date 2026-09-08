@@ -48,7 +48,7 @@ def create_participant_credentials() -> dict[str, str]:
                 room=room_name,
                 can_publish=True,
                 can_subscribe=True,
-                can_publish_data=False,
+                can_publish_data=True,
             )
         )
         .with_room_config(

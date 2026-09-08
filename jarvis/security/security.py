@@ -20,8 +20,9 @@ class Decision:
 
 
 class SecurityManager:
-    def __init__(self, log_file: Path):
+    def __init__(self, log_file: Path, trusted_mode: bool = False):
         self.log_file = log_file
+        self.trusted_mode = trusted_mode
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
 
     def classify(self, action: str) -> Risk:
@@ -61,6 +62,10 @@ class SecurityManager:
             return Risk.CRITICAL
         return Risk.MEDIUM
 
+    def requires_approval(self, action: str) -> bool:
+        risk = self.classify(action)
+        return not self.trusted_mode and risk not in {Risk.LOW, Risk.CRITICAL}
+
     def authorize(
         self,
         action: str,
@@ -72,6 +77,8 @@ class SecurityManager:
             decision = Decision(True, risk, "low-risk action")
         elif risk == Risk.CRITICAL:
             decision = Decision(False, risk, "critical action is disabled by default")
+        elif self.trusted_mode:
+            decision = Decision(True, risk, "trusted owner mode")
         elif approved is not None:
             decision = Decision(
                 approved,

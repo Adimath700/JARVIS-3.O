@@ -11,6 +11,8 @@ const connectionLabel = document.getElementById("connection-label");
 const statusTitle = document.getElementById("status-title");
 const statusMessage = document.getElementById("status-message");
 const voiceStatus = document.getElementById("voice-status");
+const securityStatus = document.getElementById("security-status");
+const securityMessage = document.getElementById("security-message");
 const userTranscript = document.getElementById("user-transcript");
 const jarvisTranscript = document.getElementById("jarvis-transcript");
 const approvalPanel = document.getElementById("approval-panel");
@@ -30,6 +32,9 @@ let activeApproval = null;
 let analyser = null;
 let audioContext = null;
 let particles = [];
+let startingTurn = null;
+let committingTurn = false;
+let manualTurnControl = true;
 
 const stateLabels = {
   offline: "OFFLINE",
@@ -133,7 +138,27 @@ function handleDisconnected() {
   connectionLabel.textContent = "OFFLINE";
   talkLabel.textContent = "CONNECT JARVIS";
   talkButton.classList.remove("active");
+  startingTurn = null;
+  committingTurn = false;
   setVisualState("offline", "Voice link disconnected");
+}
+
+function findAgentIdentity() {
+  const participants = Array.from(room?.remoteParticipants.values() || []);
+  const agent = participants.find((participant) => participant.isAgent);
+  return (agent || participants[0])?.identity || "";
+}
+
+async function signalAgent(method) {
+  const destinationIdentity = findAgentIdentity();
+  if (!destinationIdentity) {
+    throw new Error("JARVIS is still joining the room. Try again in a moment.");
+  }
+  return room.localParticipant.performRpc({
+    destinationIdentity,
+    method,
+    payload: "push-to-talk",
+  });
 }
 
 async function startTalking(event) {
@@ -146,17 +171,36 @@ async function startTalking(event) {
     return;
   }
   holding = true;
+  committingTurn = false;
   talkButton.classList.add("active");
   if (Number.isInteger(event.pointerId)) {
     talkButton.setPointerCapture(event.pointerId);
   }
-  try {
+  const prepareTurn = async () => {
+    if (manualTurnControl) {
+      await signalAgent("start_turn");
+    }
+    if (!holding) {
+      return;
+    }
     await room.localParticipant.setMicrophoneEnabled(true);
+  };
+  const pendingTurn = prepareTurn();
+  startingTurn = pendingTurn;
+  try {
+    await pendingTurn;
+    if (!holding) {
+      return;
+    }
     setVisualState("listening", "Listening to you");
   } catch (error) {
     holding = false;
     talkButton.classList.remove("active");
     setVisualState("error", error.message);
+  } finally {
+    if (startingTurn === pendingTurn) {
+      startingTurn = null;
+    }
   }
 }
 
@@ -166,9 +210,21 @@ async function stopTalking(event) {
     return;
   }
   holding = false;
+  committingTurn = true;
   talkButton.classList.remove("active");
-  await room.localParticipant.setMicrophoneEnabled(false);
   setVisualState("thinking", "Processing your request");
+  try {
+    if (startingTurn) {
+      await startingTurn;
+    }
+    await room.localParticipant.setMicrophoneEnabled(false);
+    if (manualTurnControl) {
+      await signalAgent("end_turn");
+    }
+  } catch (error) {
+    committingTurn = false;
+    setVisualState("error", error.message);
+  }
 }
 
 async function resolveApproval(approved) {
@@ -192,9 +248,18 @@ async function pollState() {
       return;
     }
     const state = await response.json();
-    if (state.status === "offline" && connected) {
+    manualTurnControl = state.manual_turn_control !== false;
+    if (
+      committingTurn
+      && ["offline", "initializing", "idle", "listening"].includes(state.status)
+    ) {
+      setVisualState("thinking", "Processing your request");
+    } else if (state.status === "offline" && connected) {
       setVisualState("initializing", "Waiting for JARVIS to join the room");
     } else {
+      if (["thinking", "speaking", "tool", "error"].includes(state.status)) {
+        committingTurn = false;
+      }
       setVisualState(state.status, state.message);
     }
     if (state.user_transcript) {
@@ -203,6 +268,10 @@ async function pollState() {
     if (state.assistant_transcript) {
       jarvisTranscript.textContent = `JARVIS // ${state.assistant_transcript}`;
     }
+    securityStatus.textContent = state.trusted_mode ? "OWNER" : "ACTIVE";
+    securityMessage.textContent = state.trusted_mode
+      ? "Owner mode executes requested actions without confirmation."
+      : "Controlled actions wait for your approval.";
     const pending = state.approvals[0];
     if (pending && pending.id !== activeApproval?.id) {
       activeApproval = pending;

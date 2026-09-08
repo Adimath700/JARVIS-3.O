@@ -1,8 +1,6 @@
 import os
 from collections.abc import Callable
 
-from jarvis.security.security import Risk
-
 
 class JarvisCapabilities:
     def __init__(
@@ -24,6 +22,7 @@ class JarvisCapabilities:
         self.ui_state = ui_state
         self.presentations = presentations
         self.files = files
+        self.ui_state.set_trusted_mode(self.security.trusted_mode)
         self.approval_timeout = float(
             os.getenv("JARVIS_APPROVAL_TIMEOUT_SECONDS", "45")
         )
@@ -34,9 +33,8 @@ class JarvisCapabilities:
         details: str,
         operation: Callable[[], str],
     ) -> str:
-        risk = self.security.classify(action)
         approved = None
-        if risk not in {Risk.LOW, Risk.CRITICAL}:
+        if self.security.requires_approval(action):
             approved = self.ui_state.request_approval(
                 action,
                 details,
@@ -122,24 +120,24 @@ class JarvisCapabilities:
             lambda: self.computer.focus_window(normalized),
         )
 
-    def send_whatsapp_message(self, phone_number: str, message: str) -> str:
+    def send_whatsapp_message(self, recipient: str, message: str) -> str:
         preview = message.strip().replace("\n", " ")[:140]
         return self._execute(
             "communication.send",
-            f'Send WhatsApp message to {phone_number}: "{preview}"',
-            lambda: self.computer.send_whatsapp_message(phone_number, message),
+            f'Send WhatsApp message to {recipient}: "{preview}"',
+            lambda: self.computer.send_whatsapp_message(recipient, message),
         )
 
     def start_whatsapp_call(
         self,
-        phone_number: str,
+        recipient: str,
         video: bool = False,
     ) -> str:
         call_type = "video" if video else "voice"
         return self._execute(
             "communication.call",
-            f"Start WhatsApp {call_type} call with {phone_number}",
-            lambda: self.computer.start_whatsapp_call(phone_number, video),
+            f"Start WhatsApp {call_type} call with {recipient}",
+            lambda: self.computer.start_whatsapp_call(recipient, video),
         )
 
     def create_presentation(

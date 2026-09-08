@@ -12,6 +12,16 @@ class AssistantUiState:
         self._user_transcript = ""
         self._assistant_transcript = ""
         self._approvals = {}
+        self._trusted_mode = False
+        self._manual_turn_control = True
+
+    def set_trusted_mode(self, enabled: bool):
+        with self._condition:
+            self._trusted_mode = enabled
+
+    def set_manual_turn_control(self, enabled: bool):
+        with self._condition:
+            self._manual_turn_control = enabled
 
     def set_agent_state(self, state: str):
         messages = {
@@ -106,6 +116,8 @@ class AssistantUiState:
                 "user_transcript": self._user_transcript,
                 "assistant_transcript": self._assistant_transcript,
                 "approvals": approvals,
+                "trusted_mode": self._trusted_mode,
+                "manual_turn_control": self._manual_turn_control,
             }
 
 
