@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(ROOT / ".env")
 
 
 try:
@@ -167,7 +169,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # Gemini native realtime model
     # ---------------------------------------------------------------
 
-    realtime_model = google.beta.realtime.RealtimeModel(
+    realtime_model = google.realtime.RealtimeModel(
         model=model,
         voice=voice,
         temperature=temperature,

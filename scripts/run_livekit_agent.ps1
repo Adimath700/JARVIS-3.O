@@ -1,8 +1,22 @@
-$ErrorActionPreference='Stop'
+param(
+    [ValidateSet('console', 'dev', 'start')]
+    [string]$Mode = 'console',
+    [switch]$Text
+)
 
-if (-not $env:GOOGLE_API_KEY) { Write-Host 'GOOGLE_API_KEY is missing from the environment/.env'; exit 1 }
-if (-not $env:LIVEKIT_URL) { Write-Host 'LIVEKIT_URL is missing from the environment/.env'; exit 1 }
-if (-not $env:LIVEKIT_API_KEY) { Write-Host 'LIVEKIT_API_KEY is missing from the environment/.env'; exit 1 }
-if (-not $env:LIVEKIT_API_SECRET) { Write-Host 'LIVEKIT_API_SECRET is missing from the environment/.env'; exit 1 }
+$ErrorActionPreference = 'Stop'
+$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+Set-Location $ProjectRoot
 
-python -m jarvis.voice.livekit_agent
+$Python = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
+if (-not (Test-Path $Python)) {
+    Write-Error 'Virtual environment not found. Run the README setup commands first.'
+}
+
+$AgentArgs = @('-m', 'jarvis.voice.livekit_agent', $Mode)
+if ($Mode -eq 'console' -and $Text) {
+    $AgentArgs += '--text'
+}
+
+& $Python @AgentArgs
+exit $LASTEXITCODE
