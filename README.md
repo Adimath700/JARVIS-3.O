@@ -31,6 +31,11 @@ Install Ollama separately and make sure `qwen3:8b` exists:
 ollama pull qwen3:8b
 ```
 
+The default `.env.example` disables Qwen's thinking mode for normal assistant
+conversation, keeps the model loaded for 30 minutes, and caps responses at 256
+tokens. Adjust `OLLAMA_THINK`, `OLLAMA_KEEP_ALIVE`, and
+`OLLAMA_NUM_PREDICT` if you prefer deeper or longer responses.
+
 For screen vision, set `GOOGLE_API_KEY` in `.env`. The screenshot is captured locally and sent only when JARVIS is asked to inspect the screen.
 
 For local STT, `faster-whisper` is used. For Piper TTS, install Piper separately and configure `PIPER_EXE` and `PIPER_VOICE`.
@@ -74,6 +79,11 @@ Required `.env` values:
 - `LIVEKIT_GEMINI_MODEL=gemini-2.5-flash-native-audio-preview-12-2025`
 - `LIVEKIT_GEMINI_VOICE=Aoede`
 - `LIVEKIT_GEMINI_AFFECTIVE_DIALOG=true`
+- `LIVEKIT_PREFIX_PADDING_MS=100`
+- `LIVEKIT_SILENCE_DURATION_MS=400`
+
+The LiveKit silence duration controls how quickly JARVIS responds after you
+finish speaking. Increase it if natural pauses are being cut off.
 
 Install the optional voice dependencies:
 

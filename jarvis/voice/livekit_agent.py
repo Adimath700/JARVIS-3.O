@@ -12,6 +12,7 @@ load_dotenv(ROOT / ".env")
 
 
 try:
+    from google.genai import types
     from livekit.agents import (
         Agent,
         AgentServer,
@@ -165,6 +166,20 @@ async def entrypoint(ctx: JobContext) -> None:
         == "true"
     )
 
+    prefix_padding_ms = int(
+        os.getenv(
+            "LIVEKIT_PREFIX_PADDING_MS",
+            "100",
+        )
+    )
+
+    silence_duration_ms = int(
+        os.getenv(
+            "LIVEKIT_SILENCE_DURATION_MS",
+            "400",
+        )
+    )
+
     # ---------------------------------------------------------------
     # Gemini native realtime model
     # ---------------------------------------------------------------
@@ -178,6 +193,14 @@ async def entrypoint(ctx: JobContext) -> None:
             "thinkingBudget": 0,
             "includeThoughts": False,
         },
+        realtime_input_config=types.RealtimeInputConfig(
+            automatic_activity_detection=types.AutomaticActivityDetection(
+                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
+                prefix_padding_ms=prefix_padding_ms,
+                silence_duration_ms=silence_duration_ms,
+            ),
+        ),
         api_key=google_api_key,
     )
 
