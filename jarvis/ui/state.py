@@ -41,6 +41,11 @@ class AssistantUiState:
             if self._activity not in {"approval", "tool", "error"}:
                 self._message = messages.get(state, state.title())
 
+    def set_status_message(self, message: str):
+        with self._condition:
+            if self._activity not in {"approval", "tool", "error"}:
+                self._message = message
+
     def set_user_transcript(self, transcript: str):
         with self._condition:
             self._user_transcript = transcript.strip()

@@ -76,10 +76,10 @@ rejected rather than used to bypass those controls.
 ## Natural Voice + Holographic UI
 
 JARVIS uses LiveKit Agents with Gemini native audio for the natural voice
-path. The current voice configuration keeps Gemini 2.5 native audio because
-it supports affective dialogue, while screen vision can use a separate Gemini
-model. The voice agent can open applications, understand the current screen,
-use local memory, and perform owner-authorized laptop actions.
+path. The current voice configuration uses Gemini 3.1 Flash Live, while screen
+vision can use a separate Gemini model. The voice agent can open applications,
+understand the current screen, use local memory, and perform owner-authorized
+laptop actions.
 
 Required `.env` values:
 
@@ -88,12 +88,13 @@ Required `.env` values:
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
 - `LIVEKIT_AGENT_NAME=jarvis`
-- `LIVEKIT_GEMINI_MODEL=gemini-2.5-flash-native-audio-preview-12-2025`
+- `LIVEKIT_GEMINI_MODEL=gemini-3.1-flash-live-preview`
 - `LIVEKIT_GEMINI_VOICE=Aoede`
-- `LIVEKIT_GEMINI_AFFECTIVE_DIALOG=true`
+- `LIVEKIT_GEMINI_AFFECTIVE_DIALOG=false`
 - `LIVEKIT_PREFIX_PADDING_MS=50`
 - `LIVEKIT_SILENCE_DURATION_MS=200`
-- `JARVIS_MANUAL_TURN_CONTROL=true`
+- `LIVEKIT_STARTUP_TIMEOUT_SECONDS=20`
+- `JARVIS_MANUAL_TURN_CONTROL=false`
 - `JARVIS_UI_PORT=8765`
 - `JARVIS_UI_AUTO_OPEN=true`
 - `JARVIS_TRUSTED_MODE=true`
@@ -135,9 +136,10 @@ then hold the central control (or hold Space) while speaking. The UI responds
 to listening, thinking, speaking, tool, approval, and error states. Agent audio
 drives the core animation in real time.
 
-With `JARVIS_MANUAL_TURN_CONTROL=true`, releasing the control immediately
-commits the recorded turn instead of waiting for Gemini's silence timer.
-Console mode always keeps automatic turn detection.
+Gemini 3.1 uses its low-latency automatic turn detector because its Live API
+does not support LiveKit's manual `generate_reply()` flow. Legacy compatible
+models may opt into `JARVIS_MANUAL_TURN_CONTROL=true`. Console mode always
+keeps automatic turn detection.
 
 The UI creates a unique LiveKit room for each connection and dispatches the
 configured `LIVEKIT_AGENT_NAME` into it. Keep the `dev` process running while

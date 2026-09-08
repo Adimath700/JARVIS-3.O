@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -11,6 +12,7 @@ from jarvis.core.capabilities import JarvisCapabilities
 from jarvis.memory.memory import Memory
 from jarvis.productivity.presentations import PresentationBuilder
 from jarvis.security.security import Risk, SecurityManager
+from jarvis.ui.state import AssistantUiState
 
 
 def test_security():
@@ -220,6 +222,35 @@ def test_destructive_terminal_commands_are_blocked():
         raise AssertionError("Destructive terminal command must be blocked")
 
 
+def test_voice_startup_configuration():
+    from jarvis.voice.livekit_agent import (
+        DEFAULT_GEMINI_MODEL,
+        _configured_gemini_model,
+        _manual_turn_control_enabled,
+    )
+
+    with patch.dict(
+        os.environ,
+        {
+            "LIVEKIT_GEMINI_MODEL": "gemini-2.5-flash-native-audio-preview-12-2025",
+        },
+    ):
+        assert _configured_gemini_model() == DEFAULT_GEMINI_MODEL
+    assert not _manual_turn_control_enabled("dev", DEFAULT_GEMINI_MODEL)
+    assert _manual_turn_control_enabled("dev", "compatible-legacy-model")
+
+
+def test_voice_startup_state_messages():
+    state = AssistantUiState()
+    state.set_agent_state("initializing")
+    state.set_status_message("Connecting Gemini voice")
+    assert state.snapshot()["message"] == "Connecting Gemini voice"
+    state.set_error("Voice startup timed out")
+    snapshot = state.snapshot()
+    assert snapshot["status"] == "error"
+    assert snapshot["message"] == "Voice startup timed out"
+
+
 if __name__ == "__main__":
     test_security()
     test_memory()
@@ -234,4 +265,6 @@ if __name__ == "__main__":
     test_file_workspace_blocks_secrets()
     test_presentation_generation()
     test_destructive_terminal_commands_are_blocked()
+    test_voice_startup_configuration()
+    test_voice_startup_state_messages()
     print("PASS")

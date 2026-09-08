@@ -35,6 +35,7 @@ let particles = [];
 let startingTurn = null;
 let committingTurn = false;
 let manualTurnControl = true;
+let connectedAt = 0;
 
 const stateLabels = {
   offline: "OFFLINE",
@@ -88,6 +89,7 @@ async function connectJarvis() {
       credentials.participant_token,
     );
     connected = true;
+    connectedAt = Date.now();
     body.dataset.connected = "true";
     connectionLabel.textContent = "LIVEKIT CONNECTED";
     talkLabel.textContent = "HOLD TO TALK";
@@ -133,6 +135,7 @@ function handleActiveSpeakers(speakers) {
 
 function handleDisconnected() {
   connected = false;
+  connectedAt = 0;
   holding = false;
   body.dataset.connected = "false";
   connectionLabel.textContent = "OFFLINE";
@@ -249,7 +252,18 @@ async function pollState() {
     }
     const state = await response.json();
     manualTurnControl = state.manual_turn_control !== false;
-    if (
+    const startupExpired = (
+      connected
+      && connectedAt
+      && Date.now() - connectedAt > 25000
+      && ["offline", "initializing"].includes(state.status)
+    );
+    if (startupExpired) {
+      setVisualState(
+        "error",
+        "Voice agent did not become ready. Check the terminal startup error.",
+      );
+    } else if (
       committingTurn
       && ["offline", "initializing", "idle", "listening"].includes(state.status)
     ) {

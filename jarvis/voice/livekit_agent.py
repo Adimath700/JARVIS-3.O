@@ -22,6 +22,11 @@ from jarvis.vision.screen import ScreenVision
 ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env")
 
+DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-live-preview"
+DEPRECATED_GEMINI_MODELS = {
+    "gemini-2.5-flash-native-audio-preview-12-2025",
+}
+
 
 try:
     from google.genai import types
@@ -90,6 +95,7 @@ COMPUTER TOOLS
 # ---------------------------------------------------------------------------
 # Agent
 # ---------------------------------------------------------------------------
+
 
 class JarvisVoiceAgent(Agent):
     def __init__(self, capabilities: JarvisCapabilities) -> None:
@@ -444,38 +450,54 @@ class JarvisVoiceAgent(Agent):
 server = AgentServer(job_executor_type=JobExecutorType.THREAD)
 
 
-@server.rtc_session(
-    agent_name=os.getenv("LIVEKIT_AGENT_NAME", "jarvis")
-)
+@server.rtc_session(agent_name=os.getenv("LIVEKIT_AGENT_NAME", "jarvis"))
 async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {
         "room": ctx.room.name,
     }
     ui_state.set_agent_state("initializing")
+    ui_state.set_status_message("Checking voice configuration")
 
     google_api_key = os.getenv("GOOGLE_API_KEY")
 
     if not google_api_key:
-        raise RuntimeError(
-            "GOOGLE_API_KEY is missing from the environment."
-        )
+        message = "GOOGLE_API_KEY is missing. Add it to .env and restart JARVIS."
+        ui_state.set_error(message)
+        raise RuntimeError(message)
 
-    model = os.getenv(
-        "LIVEKIT_GEMINI_MODEL",
-        "gemini-2.5-flash-native-audio-preview-12-2025",
-    )
+    model = _configured_gemini_model()
 
     voice = os.getenv(
         "LIVEKIT_GEMINI_VOICE",
         "Aoede",
     )
 
-    temperature = float(
-        os.getenv(
-            "LIVEKIT_GEMINI_TEMPERATURE",
-            "0.8",
+    try:
+        temperature = float(
+            os.getenv(
+                "LIVEKIT_GEMINI_TEMPERATURE",
+                "0.8",
+            )
         )
-    )
+        prefix_padding_ms = int(
+            os.getenv(
+                "LIVEKIT_PREFIX_PADDING_MS",
+                "50",
+            )
+        )
+        silence_duration_ms = int(
+            os.getenv(
+                "LIVEKIT_SILENCE_DURATION_MS",
+                "200",
+            )
+        )
+        startup_timeout = float(os.getenv("LIVEKIT_STARTUP_TIMEOUT_SECONDS", "20"))
+        if startup_timeout <= 0:
+            raise ValueError("LIVEKIT_STARTUP_TIMEOUT_SECONDS must be positive")
+    except ValueError as exc:
+        message = f"Invalid voice setting in .env: {exc}"
+        ui_state.set_error(message)
+        raise RuntimeError(message) from exc
 
     affective_dialog = (
         os.getenv(
@@ -485,22 +507,8 @@ async def entrypoint(ctx: JobContext) -> None:
         == "true"
     )
     command = _selected_command()
-    manual_turn_control = _manual_turn_control_enabled(command)
+    manual_turn_control = _manual_turn_control_enabled(command, model)
     ui_state.set_manual_turn_control(manual_turn_control)
-
-    prefix_padding_ms = int(
-        os.getenv(
-            "LIVEKIT_PREFIX_PADDING_MS",
-            "50",
-        )
-    )
-
-    silence_duration_ms = int(
-        os.getenv(
-            "LIVEKIT_SILENCE_DURATION_MS",
-            "200",
-        )
-    )
 
     # ---------------------------------------------------------------
     # Gemini native realtime model
@@ -516,20 +524,34 @@ async def entrypoint(ctx: JobContext) -> None:
             silence_duration_ms=silence_duration_ms,
         )
 
-    realtime_model = google.realtime.RealtimeModel(
-        model=model,
-        voice=voice,
-        temperature=temperature,
-        enable_affective_dialog=affective_dialog,
-        thinking_config={
-            "thinkingBudget": 0,
-            "includeThoughts": False,
-        },
-        realtime_input_config=types.RealtimeInputConfig(
-            automatic_activity_detection=activity_detection,
-        ),
-        api_key=google_api_key,
+    ui_state.set_status_message(f"Loading Gemini voice ({model})")
+    thinking_config = (
+        types.ThinkingConfig(
+            thinking_level=types.ThinkingLevel.MINIMAL,
+            include_thoughts=False,
+        )
+        if "gemini-3.1" in model
+        else types.ThinkingConfig(
+            thinking_budget=0,
+            include_thoughts=False,
+        )
     )
+    try:
+        realtime_model = google.realtime.RealtimeModel(
+            model=model,
+            voice=voice,
+            temperature=temperature,
+            enable_affective_dialog=(affective_dialog and "gemini-3.1" not in model),
+            thinking_config=thinking_config,
+            realtime_input_config=types.RealtimeInputConfig(
+                automatic_activity_detection=activity_detection,
+            ),
+            api_key=google_api_key,
+        )
+    except Exception as exc:
+        message = f"Gemini voice configuration failed: {exc}"
+        ui_state.set_error(message)
+        raise RuntimeError(message) from exc
 
     # ---------------------------------------------------------------
     # Agent session
@@ -573,10 +595,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     @session.on("conversation_item_added")
     def on_conversation_item_added(event) -> None:
-        if (
-            isinstance(event.item, llm.ChatMessage)
-            and event.item.role == "assistant"
-        ):
+        if isinstance(event.item, llm.ChatMessage) and event.item.role == "assistant":
             ui_state.set_assistant_transcript(event.item.text_content)
 
     @session.on("error")
@@ -610,42 +629,44 @@ async def entrypoint(ctx: JobContext) -> None:
     # during the connection process, reducing perceived startup latency.
     # ---------------------------------------------------------------
 
-    await session.start(
-        agent=JarvisVoiceAgent(capabilities),
-        room=ctx.room,
-        room_options=room_io.RoomOptions(
-            audio_input=room_io.AudioInputOptions(
-                pre_connect_audio=True,
-                pre_connect_audio_timeout=3.0,
-                auto_gain_control=True,
+    ui_state.set_status_message("Connecting Gemini voice")
+    try:
+        await asyncio.wait_for(
+            session.start(
+                agent=JarvisVoiceAgent(capabilities),
+                room=ctx.room,
+                room_options=room_io.RoomOptions(
+                    audio_input=room_io.AudioInputOptions(
+                        pre_connect_audio=True,
+                        pre_connect_audio_timeout=1.0,
+                        auto_gain_control=True,
+                    ),
+                    audio_output=True,
+                ),
             ),
-            audio_output=True,
-        ),
-    )
+            timeout=startup_timeout,
+        )
+    except asyncio.TimeoutError as exc:
+        message = (
+            f"Voice startup timed out after {startup_timeout:g}s. "
+            "Check GOOGLE_API_KEY, internet access, and the Gemini model."
+        )
+        ui_state.set_error(message)
+        raise RuntimeError(message) from exc
+    except Exception as exc:
+        message = f"Voice startup failed: {exc}"
+        ui_state.set_error(message)
+        raise RuntimeError(message) from exc
+
     if manual_turn_control:
         session.input.set_audio_enabled(False)
-
-    # Connect the job to the LiveKit room.
-    await ctx.connect()
-
-    # ---------------------------------------------------------------
-    # Initial greeting
-    #
-    # JARVIS speaks first after connection.
-    # ---------------------------------------------------------------
-
-    await session.generate_reply(
-        instructions=(
-            "Greet the user naturally and briefly. "
-            "Sound relaxed and conversational, as if you are already "
-            "familiar with them. Do not give a long introduction."
-        )
-    )
+    ui_state.set_agent_state("idle")
 
 
 # ---------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------
+
 
 def _selected_command() -> str:
     return next(
@@ -658,8 +679,17 @@ def _selected_command() -> str:
     )
 
 
-def _manual_turn_control_enabled(command: str) -> bool:
+def _configured_gemini_model() -> str:
+    configured = os.getenv("LIVEKIT_GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
+    if not configured or configured in DEPRECATED_GEMINI_MODELS:
+        return DEFAULT_GEMINI_MODEL
+    return configured
+
+
+def _manual_turn_control_enabled(command: str, model: str) -> bool:
     if command not in {"dev", "start", "connect"}:
+        return False
+    if "gemini-3.1" in model:
         return False
     configured = os.getenv("JARVIS_MANUAL_TURN_CONTROL")
     if configured is not None:
