@@ -34,6 +34,7 @@ class SecurityManager:
             "memory.remember",
             "memory.search",
             "app.open",
+            "media.play",
         }:
             return Risk.LOW
         if action in {

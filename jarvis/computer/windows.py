@@ -23,9 +23,10 @@ except ImportError:
     win32gui = None
 
 try:
-    from pywinauto import Application
+    from pywinauto import Application, Desktop
 except ImportError:
     Application = None
+    Desktop = None
 
 
 class WindowsComputer:
@@ -113,12 +114,15 @@ class WindowsComputer:
             "notepad": "Notepad",
             "calculator": "Calculator",
             "whatsapp": "WhatsApp",
+            "spotify": "Spotify",
             "discord": "Discord",
             "edge": "Microsoft Edge",
             "file explorer": "File Explorer",
         }
         display = aliases.get(name.lower(), name)
-        if name.lower() == "whatsapp" and self._start_search_and_open(display):
+        if name.lower() in {"whatsapp", "spotify"} and self._start_search_and_open(
+            display
+        ):
             return f"Opening {display}."
         app_id = self._start_menu_app_id(display)
         if app_id:
@@ -271,9 +275,16 @@ class WindowsComputer:
         return False
 
     def _whatsapp_window(self):
-        if Application is None or win32gui is None:
+        if win32gui is None:
             return None
         handle = win32gui.GetForegroundWindow()
+        if Desktop is not None:
+            try:
+                return Desktop(backend="uia").window(handle=handle)
+            except Exception:
+                pass
+        if Application is None:
+            return None
         try:
             return Application(backend="uia").connect(handle=handle).window(
                 handle=handle
@@ -283,28 +294,122 @@ class WindowsComputer:
 
     @staticmethod
     def _control_label(control):
+        labels = []
         try:
-            return control.window_text().strip()
+            text = control.window_text().strip()
+            if text:
+                labels.append(text)
         except Exception:
-            return ""
+            pass
+        try:
+            name = control.element_info.name.strip()
+            if name and name not in labels:
+                labels.append(name)
+        except Exception:
+            pass
+        return "\n".join(labels)
+
+    def _control_text(self, control):
+        labels = [self._control_label(control)]
+        try:
+            labels.extend(
+                self._control_label(child)
+                for child in control.descendants()
+            )
+        except Exception:
+            pass
+        return "\n".join(label for label in labels if label)
+
+    @staticmethod
+    def _click_control(control):
+        try:
+            control.click_input()
+            return True
+        except Exception:
+            try:
+                control.parent().click_input()
+                return True
+            except Exception:
+                return False
+
+    @staticmethod
+    def _window_controls(window, control_types):
+        if window is None:
+            return []
+        controls = []
+        for control_type in control_types:
+            try:
+                controls.extend(window.descendants(control_type=control_type))
+            except Exception:
+                pass
+        return controls
 
     def _whatsapp_message_box(self, window):
-        if window is None:
-            return None
         return next(
             (
-                edit
-                for edit in window.descendants(control_type="Edit")
-                if "message" in self._control_label(edit).lower()
-                and "search" not in self._control_label(edit).lower()
+                control
+                for control in self._window_controls(
+                    window,
+                    ("Edit", "Document"),
+                )
+                if any(
+                    term in self._control_label(control).casefold()
+                    for term in ("type a message", "compose", "message to")
+                )
+                and "search" not in self._control_label(control).casefold()
             ),
             None,
         )
 
+    def _focus_whatsapp_composer(self, window):
+        message_box = self._whatsapp_message_box(window)
+        if message_box is not None and self._click_control(message_box):
+            return True
+        if window is None:
+            return False
+        try:
+            bounds = window.rectangle()
+            width = bounds.right - bounds.left
+            pyautogui.click(
+                x=bounds.left + int(width * 0.65),
+                y=bounds.bottom - 55,
+            )
+            return True
+        except Exception:
+            return False
+
+    def _find_whatsapp_action(self, window, terms, excluded_terms=()):
+        for control in self._window_controls(
+            window,
+            ("Button", "Hyperlink", "Text"),
+        ):
+            label = self._control_label(control).casefold()
+            if (
+                label
+                and any(term in label for term in terms)
+                and not any(term in label for term in excluded_terms)
+            ):
+                return control
+        return None
+
+    def _whatsapp_message_count(self, window, message):
+        expected = " ".join(message.casefold().split())
+        if not expected:
+            return 0
+        matches = 0
+        controls = self._window_controls(window, ("ListItem",))
+        if not controls:
+            controls = self._window_controls(window, ("Text",))
+        for control in controls:
+            label = " ".join(self._control_text(control).casefold().split())
+            if expected in label:
+                matches += 1
+        return matches
+
     def _search_whatsapp_contact(self, contact):
         window = self._whatsapp_window()
         if window is not None:
-            edits = window.descendants(control_type="Edit")
+            edits = self._window_controls(window, ("Edit",))
             search = next(
                 (
                     edit
@@ -314,33 +419,33 @@ class WindowsComputer:
                 None,
             )
             if search is not None:
-                search.click_input()
-                search.set_edit_text(contact)
+                self._click_control(search)
+                pyautogui.hotkey("ctrl", "a")
+                self._paste_text(contact)
                 time.sleep(0.8)
                 target = contact.casefold()
-                for control_type in ("ListItem", "Button", "Text"):
-                    for control in window.descendants(control_type=control_type):
-                        label = self._control_label(control)
-                        normalized = label.casefold()
-                        if normalized == target or normalized.startswith(
-                            f"{target}\n"
-                        ):
-                            control.click_input()
-                            time.sleep(0.5)
-                            return True
+                for control in self._window_controls(
+                    window,
+                    ("ListItem", "Button", "Text"),
+                ):
+                    normalized = self._control_text(control).casefold()
+                    if (
+                        normalized == target
+                        or normalized.startswith(f"{target}\n")
+                    ) and self._click_control(control):
+                        time.sleep(0.75)
+                        return True
 
-        pyautogui.hotkey("ctrl", "f")
-        time.sleep(0.2)
-        pyautogui.hotkey("ctrl", "a")
+        pyautogui.hotkey("ctrl", "n")
+        time.sleep(0.35)
         self._paste_text(contact)
         time.sleep(0.8)
         pyautogui.press("down")
         pyautogui.press("enter")
-        time.sleep(0.5)
+        time.sleep(0.75)
         refreshed_window = self._whatsapp_window()
-        return (
-            refreshed_window is None
-            or self._whatsapp_message_box(refreshed_window) is not None
+        return refreshed_window is None or self._focus_whatsapp_composer(
+            refreshed_window
         )
 
     def _open_whatsapp_conversation(self, recipient, message=""):
@@ -379,7 +484,7 @@ class WindowsComputer:
             pyautogui.hotkey("ctrl", "v")
         finally:
             if previous is not None:
-                time.sleep(0.1)
+                time.sleep(0.25)
                 pyperclip.copy(previous)
 
     def send_whatsapp_message(self, recipient, message):
@@ -396,13 +501,49 @@ class WindowsComputer:
                 "matching chat was not ready."
             )
         time.sleep(0.75)
+        window = self._whatsapp_window()
+        if not self._focus_whatsapp_composer(window):
+            return (
+                f"Opened the WhatsApp chat for {target}, but could not focus "
+                "the message box."
+            )
+        previous_matches = self._whatsapp_message_count(window, message)
         if not message_prefilled:
-            message_box = self._whatsapp_message_box(self._whatsapp_window())
-            if message_box is not None:
-                message_box.click_input()
             self._paste_text(message)
         pyautogui.press("enter")
-        return f"Submitted the WhatsApp message to {target}."
+        time.sleep(0.6)
+        window = self._whatsapp_window()
+        if self._whatsapp_message_count(window, message) > previous_matches:
+            return f"Sent the WhatsApp message to {target}."
+        send_button = self._find_whatsapp_action(
+            window,
+            ("send",),
+            ("send voice", "send video", "send file"),
+        )
+        if send_button is not None and self._click_control(send_button):
+            time.sleep(0.5)
+            if (
+                self._whatsapp_message_count(
+                    self._whatsapp_window(),
+                    message,
+                )
+                > previous_matches
+            ):
+                return f"Sent the WhatsApp message to {target}."
+        return (
+            f"Submitted the WhatsApp message to {target}, but WhatsApp did "
+            "not expose delivery confirmation."
+        )
+
+    def _whatsapp_call_started(self):
+        title = self.active_window_title().casefold()
+        if "whatsapp" in title and "call" in title:
+            return True
+        window = self._whatsapp_window()
+        return self._find_whatsapp_action(
+            window,
+            ("end call", "hang up", "leave call"),
+        ) is not None
 
     def start_whatsapp_call(self, recipient, video=False):
         self._require_input()
@@ -414,18 +555,110 @@ class WindowsComputer:
                 f"{call_type} call because a matching chat was not ready."
             )
         window = self._whatsapp_window()
-        if window is None:
-            return (
-                f"Opened the WhatsApp chat for {target}, but automatic calling "
-                "requires pywinauto and pywin32."
-            )
-        expected = f"{call_type} call"
-        for button in window.descendants(control_type="Button"):
-            label = self._control_label(button).lower()
-            if expected in label:
-                button.click_input()
-                return f"Started a WhatsApp {call_type} call with {target}."
-        return (
-            f"Opened the WhatsApp chat for {target}, but could not find the "
-            f"{call_type} call button. Start it manually from the open chat."
+        terms = (
+            ("video call", "start video", "video")
+            if video
+            else ("voice call", "audio call", "start call", "call")
         )
+        excluded = (
+            ("voice", "audio", "group", "turn off")
+            if video
+            else ("video", "group", "end call", "hang up")
+        )
+        call_button = self._find_whatsapp_action(window, terms, excluded)
+        triggered = (
+            call_button is not None and self._click_control(call_button)
+        )
+        if triggered:
+            deadline = time.monotonic() + 4
+            while time.monotonic() < deadline:
+                if self._whatsapp_call_started():
+                    return (
+                        f"Started a WhatsApp {call_type} call with {target}."
+                    )
+                time.sleep(0.25)
+        return (
+            f"Opened the WhatsApp chat for {target}, but could not find or "
+            f"confirm its {call_type} call control."
+        )
+
+    def play_spotify_song(self, song, artist=""):
+        self._require_input()
+        title = song.strip()
+        performer = artist.strip()
+        if not title:
+            raise ValueError("A Spotify song name is required")
+        if not self._launch_spotify():
+            return "I could not open Spotify from the Windows Start menu."
+        query = " ".join(part for part in (title, performer) if part)
+        pyautogui.hotkey("ctrl", "k")
+        time.sleep(0.35)
+        pyautogui.hotkey("ctrl", "a")
+        self._paste_text(query)
+        time.sleep(float(os.getenv("JARVIS_SPOTIFY_SEARCH_SECONDS", "1.2")))
+        pyautogui.press("enter")
+        deadline = time.monotonic() + float(
+            os.getenv("JARVIS_SPOTIFY_CONFIRM_SECONDS", "3")
+        )
+        while time.monotonic() < deadline:
+            if self._spotify_now_playing_matches(title):
+                return f'Playing "{query}" on Spotify.'
+            time.sleep(0.25)
+        return f'Asked Spotify to play "{query}" from Quick Search.'
+
+    def _launch_spotify(self):
+        if "spotify" in self.active_window_title().casefold():
+            return True
+        timeout = float(os.getenv("JARVIS_SPOTIFY_LOAD_SECONDS", "10"))
+        if self._start_search_and_open("Spotify", timeout):
+            return True
+        app_id = self._start_menu_app_id("Spotify")
+        if app_id:
+            subprocess.Popen(
+                ["explorer.exe", f"shell:AppsFolder\\{app_id}"],
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            return self._wait_for_window("spotify", timeout)
+        return False
+
+    def _spotify_window(self):
+        if win32gui is None:
+            return None
+        handle = win32gui.GetForegroundWindow()
+        if Desktop is not None:
+            try:
+                return Desktop(backend="uia").window(handle=handle)
+            except Exception:
+                pass
+        if Application is None:
+            return None
+        try:
+            return Application(backend="uia").connect(handle=handle).window(
+                handle=handle
+            )
+        except Exception:
+            return None
+
+    def _spotify_now_playing_matches(self, title):
+        expected = " ".join(title.casefold().split())
+        window = self._spotify_window()
+        if not expected or window is None:
+            return False
+        try:
+            window_bounds = window.rectangle()
+            player_top = window_bounds.bottom - min(
+                180,
+                (window_bounds.bottom - window_bounds.top) // 3,
+            )
+        except Exception:
+            return False
+        for control in self._window_controls(window, ("Text", "Button")):
+            label = " ".join(self._control_label(control).casefold().split())
+            if expected not in label:
+                continue
+            try:
+                if control.rectangle().top >= player_top:
+                    return True
+            except Exception:
+                pass
+        return False

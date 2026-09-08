@@ -22,6 +22,7 @@ def test_security():
     assert s.classify("terminal.exec") == Risk.HIGH
     assert s.classify("communication.send") == Risk.HIGH
     assert s.classify("file.open") == Risk.HIGH
+    assert s.classify("media.play") == Risk.LOW
     assert s.authorize(
         "keyboard.type",
         interactive=False,
@@ -166,6 +167,161 @@ def test_whatsapp_accepts_contact_names_and_phone_numbers():
     search.assert_called_once_with("Priya Sharma")
 
 
+def test_whatsapp_message_focuses_composer_and_verifies_send():
+    computer = WindowsComputer()
+    input_driver = Mock()
+    window = Mock()
+    with (
+        patch.object(computer, "_require_input"),
+        patch.object(
+            computer,
+            "_open_whatsapp_conversation",
+            return_value=("Priya", True, False),
+        ),
+        patch.object(computer, "_whatsapp_window", return_value=window),
+        patch.object(computer, "_focus_whatsapp_composer", return_value=True),
+        patch.object(computer, "_paste_text") as paste,
+        patch.object(
+            computer,
+            "_whatsapp_message_count",
+            side_effect=(0, 1),
+        ),
+        patch("jarvis.computer.windows.pyautogui", input_driver),
+        patch("jarvis.computer.windows.time.sleep"),
+    ):
+        result = computer.send_whatsapp_message("Priya", "On my way")
+    assert result == "Sent the WhatsApp message to Priya."
+    paste.assert_called_once_with("On my way")
+    input_driver.press.assert_called_once_with("enter")
+
+
+def test_whatsapp_detects_modern_composer_and_video_labels():
+    computer = WindowsComputer()
+    search = Mock()
+    search.window_text.return_value = "Search or start a new chat"
+    search.element_info.name = ""
+    composer = Mock()
+    composer.window_text.return_value = "Type a message to Priya"
+    composer.element_info.name = ""
+    video = Mock()
+    video.window_text.return_value = "Video"
+    video.element_info.name = ""
+    window = Mock()
+
+    def descendants(*, control_type):
+        return {
+            "Edit": [search],
+            "Document": [composer],
+            "Button": [video],
+            "Hyperlink": [],
+            "Text": [],
+        }.get(control_type, [])
+
+    window.descendants.side_effect = descendants
+    assert computer._whatsapp_message_box(window) is composer
+    assert (
+        computer._find_whatsapp_action(
+            window,
+            ("video call", "start video", "video"),
+            ("voice", "audio", "group", "turn off"),
+        )
+        is video
+    )
+
+
+def test_whatsapp_video_call_uses_accessible_button():
+    computer = WindowsComputer()
+    call_button = Mock()
+    with (
+        patch.object(computer, "_require_input"),
+        patch.object(
+            computer,
+            "_open_whatsapp_conversation",
+            return_value=("Priya", True, False),
+        ),
+        patch.object(computer, "_whatsapp_window", return_value=Mock()),
+        patch.object(
+            computer,
+            "_find_whatsapp_action",
+            return_value=call_button,
+        ),
+        patch.object(computer, "_click_control", return_value=True) as click,
+        patch.object(computer, "_whatsapp_call_started", return_value=True),
+    ):
+        result = computer.start_whatsapp_call("Priya", video=True)
+    assert result == "Started a WhatsApp video call with Priya."
+    click.assert_called_once_with(call_button)
+
+
+def test_spotify_quick_search_selects_requested_song():
+    computer = WindowsComputer()
+    input_driver = Mock()
+    with (
+        patch.object(computer, "_require_input"),
+        patch.object(computer, "_launch_spotify", return_value=True),
+        patch.object(
+            computer,
+            "_spotify_now_playing_matches",
+            return_value=True,
+        ),
+        patch.object(computer, "_paste_text") as paste,
+        patch("jarvis.computer.windows.pyautogui", input_driver),
+        patch("jarvis.computer.windows.time.sleep"),
+    ):
+        result = computer.play_spotify_song("Blinding Lights", "The Weeknd")
+    assert result == 'Playing "Blinding Lights The Weeknd" on Spotify.'
+    assert [entry.args for entry in input_driver.hotkey.call_args_list] == [
+        ("ctrl", "k"),
+        ("ctrl", "a"),
+    ]
+    paste.assert_called_once_with("Blinding Lights The Weeknd")
+    input_driver.press.assert_called_once_with("enter")
+
+
+def test_spotify_playback_confirmation_uses_now_playing_bar():
+    computer = WindowsComputer()
+    window = Mock()
+    window.rectangle.return_value = Mock(
+        left=0,
+        top=0,
+        right=1200,
+        bottom=800,
+    )
+    search_result = Mock()
+    search_result.window_text.return_value = "Blinding Lights"
+    search_result.element_info.name = ""
+    search_result.rectangle.return_value = Mock(top=240)
+    now_playing = Mock()
+    now_playing.window_text.return_value = "Blinding Lights"
+    now_playing.element_info.name = ""
+    now_playing.rectangle.return_value = Mock(top=740)
+    window.descendants.side_effect = lambda *, control_type: (
+        [search_result, now_playing] if control_type == "Text" else []
+    )
+    with patch.object(computer, "_spotify_window", return_value=window):
+        assert computer._spotify_now_playing_matches("Blinding Lights")
+
+
+def test_spotify_capability_uses_dedicated_media_action():
+    root = Path(tempfile.mkdtemp())
+    computer = Mock()
+    computer.play_spotify_song.return_value = "Playing."
+    approvals = Mock()
+    approvals.snapshot.return_value = {"status": "idle"}
+    capabilities = JarvisCapabilities(
+        Memory(root / "memory.json"),
+        Mock(),
+        Mock(),
+        computer,
+        SecurityManager(root / "audit.jsonl"),
+        approvals,
+    )
+
+    assert capabilities.play_spotify_song("Numb", "Linkin Park") == "Playing."
+    computer.play_spotify_song.assert_called_once_with("Numb", "Linkin Park")
+    approvals.request_approval.assert_not_called()
+
+
 def test_windows_start_search_launch():
     computer = WindowsComputer()
     input_driver = Mock()
@@ -261,6 +417,12 @@ if __name__ == "__main__":
     test_voice_capabilities_trusted_mode_skips_approval()
     test_whatsapp_requires_approval()
     test_whatsapp_accepts_contact_names_and_phone_numbers()
+    test_whatsapp_message_focuses_composer_and_verifies_send()
+    test_whatsapp_detects_modern_composer_and_video_labels()
+    test_whatsapp_video_call_uses_accessible_button()
+    test_spotify_quick_search_selects_requested_song()
+    test_spotify_playback_confirmation_uses_now_playing_bar()
+    test_spotify_capability_uses_dedicated_media_action()
     test_windows_start_search_launch()
     test_file_workspace_blocks_secrets()
     test_presentation_generation()

@@ -155,6 +155,7 @@ Voice tool examples:
 - “Run `dir` in the terminal.”
 - “Send ‘I will arrive at six’ on WhatsApp to Priya.”
 - “Start a WhatsApp video call with Mom.”
+- “Play Blinding Lights by The Weeknd on Spotify.”
 - “Create a five-slide presentation about renewable energy.”
 - “List the files in my Documents folder.”
 - “Open my project presentation.”
@@ -165,7 +166,11 @@ number. For names, it opens WhatsApp through Windows Start search, searches the
 signed-in account's contacts, and selects the matching result without fixed
 screen coordinates. Calls use the accessible WhatsApp call button when
 available; if the installed WhatsApp version does not expose that control,
-JARVIS leaves the selected chat open for manual completion.
+JARVIS reports that it could not confirm the call instead of claiming success.
+
+Spotify playback uses the official Desktop Quick Search shortcut, searches the
+requested title and optional artist together, selects the top result, and
+checks the now-playing bar when Spotify exposes it to Windows accessibility.
 
 Generated presentations are stored in `data/presentations` by default. Change
 `JARVIS_PRESENTATION_DIR` in `.env` to use another folder.

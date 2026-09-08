@@ -80,6 +80,8 @@ COMPUTER TOOLS
   presentation actions without repeated approval prompts.
 - Use inspect_screen before mouse actions when the target coordinates are not
   already clear. WhatsApp recipients may be saved contact names or numbers.
+- Use play_spotify_song for requested Spotify tracks instead of generic typing,
+  links, terminal paths, or play/pause hotkeys.
 - If WhatsApp opens a chat but cannot complete a call, explain that clearly.
 - Build a complete slide outline before calling the presentation tool. Separate
   slides with a line containing `---`; put the slide title first, followed by
@@ -258,6 +260,25 @@ class JarvisVoiceAgent(Agent):
             self.capabilities.start_whatsapp_call,
             recipient,
             video,
+        )
+
+    @function_tool()
+    async def play_spotify_song(
+        self,
+        context: RunContext,
+        song: str,
+        artist: str = "",
+    ) -> str:
+        """Search for and play a requested song in Spotify Desktop.
+
+        Args:
+            song: Exact song title requested by the user.
+            artist: Optional artist name used to improve the search.
+        """
+        return await asyncio.to_thread(
+            self.capabilities.play_spotify_song,
+            song,
+            artist,
         )
 
     @function_tool()

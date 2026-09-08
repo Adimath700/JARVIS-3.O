@@ -140,6 +140,18 @@ class JarvisCapabilities:
             lambda: self.computer.start_whatsapp_call(recipient, video),
         )
 
+    def play_spotify_song(self, song: str, artist: str = "") -> str:
+        title = song.strip()
+        performer = artist.strip()
+        description = f'Play "{title}" on Spotify'
+        if performer:
+            description = f'Play "{title}" by {performer} on Spotify'
+        return self._execute(
+            "media.play",
+            description,
+            lambda: self.computer.play_spotify_song(title, performer),
+        )
+
     def create_presentation(
         self,
         title: str,
